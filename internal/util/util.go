@@ -169,11 +169,14 @@ func ReadFirstLine(path string) (string, error) {
 		return "", err
 	}
 	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	if scanner.Scan() {
-		return scanner.Text(), nil
+	// bufio.Reader (not Scanner): Scanner's 64 KiB token cap aborts on long
+	// first lines, which chat metadata can exceed.
+	reader := bufio.NewReader(f)
+	line, err := reader.ReadString('\n')
+	if err != nil && line == "" {
+		return "", err
 	}
-	return "", scanner.Err()
+	return strings.TrimRight(line, "\r\n"), nil
 }
 
 func IsPathUnderParent(parent, child string) bool {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -34,6 +35,25 @@ func ResponseTime(next http.Handler) http.Handler {
 		duration := time.Since(start)
 		sw.Header().Set("X-Response-Time", duration.String())
 	})
+}
+
+// AccessLog mirrors the Node server's request logging: one line per request
+// with method, path, status and duration. Output goes through the standard
+// logger so the mobile shell's ring buffer (and logcat) picks it up.
+func AccessLog(cfg *config.Config) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !cfg.Logging.EnableAccessLog {
+				next.ServeHTTP(w, r)
+				return
+			}
+			start := time.Now()
+			sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+			next.ServeHTTP(sw, r)
+			log.Printf("[access] %s %s -> %d (%s)", r.Method, r.URL.Path, sw.status,
+				time.Since(start).Round(time.Millisecond))
+		})
+	}
 }
 
 // BodyLimit restricts the request body to the specified number of bytes.
@@ -155,6 +175,7 @@ func BufferRequestBody(next http.Handler) http.Handler {
 func SetupMiddleware(r chi.Router, cfg *config.Config) {
 	r.Use(SecurityHeaders)
 	r.Use(ResponseTime)
+	r.Use(AccessLog(cfg))
 	r.Use(Gzip)
 	r.Use(CORS(cfg.CORS))
 	r.Use(BodyLimit(500 << 20)) // 500 MB
