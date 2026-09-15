@@ -2,7 +2,7 @@
 data/
 dist/
 *.exe
-gotavern
+/gotavern-termux-arm64
 *.log
 
 # signing keys
