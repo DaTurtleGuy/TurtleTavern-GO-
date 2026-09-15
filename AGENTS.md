@@ -1,0 +1,218 @@
+# AGENTS.md — TurtleTavern (Go) — Knowledge Base
+
+This file captures hard-won context so future sessions don't repeat mistakes.
+
+## Project Overview
+
+Go rewrite of SillyTavern's backend. Serves the **unchanged** SillyTavern frontend (HTML/JS/CSS) from `public/`. The frontend is NOT modified at runtime — it's served from disk. `data/` holds user data exclusively.
+
+- Module: `github.com/TurtleTavern/turtletavern`
+- Go 1.26, pure Go deps (chi, tiktoken, yaml.v3, modernc.org/sqlite)
+- No git repo — local-only
+
+## Release Checklist (GitHub)
+
+1. `go build ./... && go vet ./...`
+2. `python verify/endpoints.py` (46/46) + `python verify/backup_restore.py` (21/21)
+3. Rebuild dist: `Windows-x64.zip` (exe + public + default + config.yaml) and
+   `Termux-arm64.tar.gz` (arm64 binary + public + default + config.yaml)
+4. Bump the Android app (`versionName` / `versionCode`), rebuild its
+   `bootstrap.zip` from THIS repo (`tools/pack_mobile_assets.py`) and the AAR
+   (`gomobile bind -target=android/arm64 ...`), then assembleRelease
+5. GitHub release: APK + Windows zip + Termux tar.gz, with notes pointing
+   Node users at `public/MIGRATION.md`
+6. Never commit `data/`, `dist/`, signing keystores, or real user configs
+
+## Node.js (TurtleTavern) Backup/Restore Parity (2026-09-14)
+
+The Node fork has the same feature set, wire-compatible in both directions:
+- `TurtleTavern/src/endpoints/userdata.js` — `GET /api/users/backup` (archiver streaming), `/backup/capabilities`, `POST /restore` (multer spool → yauzl validate → staging swap), `/restore/status`.
+- Mounted in `server-startup.js`; the global multer in `server-main.js` was widened from `.single('avatar')` to `.fields([{name:'avatar'},{name:'file'}])` so the restore upload's `file` field survives the app-level parser (every upload in this fork flows through that one global multer).
+- Frontend files copied verbatim from GoTavern's `public/`: `scripts/user-data.js`, `scripts/templates/userDataBackup.html`, `scripts/templates/userDataRestore.html`, `scripts/templates/userProfile.html`; Node `public/scripts/user.js` imports `user-data.js` (old `backupUserData` POST flow removed).
+- Wire format constants (format `turtletavern-backup`, version 1, manifest field names, checksums.sha256 `hash  path` lines) MUST stay identical in both implementations.
+- Node export quirk: checksum lines must be pre-computed (`hashFile`) before `archive.append` — pushing them from stream-flush callbacks races archiver's finalize and silently drops tail lines.
+- Round-trip verified: Go→Node and Node→Go restores both returned `{ok, files:168, bytes:12558208}` byte-identical.
+- Sandbox tests used throwaway instances: node `--dataRoot %TEMP%\...` on port 3999, throwaway Go on 3998 with a port-patched config copy + `default/` + `public`. Do NOT restore test archives into a live server — it atomically replaces the user's data root.
+- Desktop `cmd/server` previously had `WriteTimeout: 60s` — killed streaming downloads ~1.5 GB in at ~50 MB/s link speed. Both `ReadTimeout`/`WriteTimeout` are now `0`; keep them 0.
+
+## Android SQLite / Seccomp Pitfall (CONFIRMED 2026-09-14)
+
+Android's **x86_64** app seccomp allowlist blocks the legacy stat syscall family
+(`lstat`/`stat`/`fstat` = syscall 6/4/5). Crash signature on x86_64 emulators/AVDs:
+
+```
+Fatal signal 31 (SIGSYS), code 1 (SYS_SECCOMP), syscall 6
+Cause: seccomp prevented call to disallowed x86_64 system call 6
+```
+
+- **arm64 has no `lstat` syscall** (uses `newfstatat`) → unaffected. Proven on a Galaxy A54.
+- Switching to `mattn/go-sqlite3` (real C SQLite via CGO) does **NOT** fix x86_64 —
+  Bionic still issues `lstat`. Verified by symbol-inspecting `libgojni.so`
+  (`sqlite3_open_v2` present, modernc absent — still crashes).
+- **Conclusion: the app is arm64-only.** Enforced two ways:
+  1. `gomobile bind -target=android/arm64` (no amd64 in the AAR)
+  2. `ndk { abiFilters += "arm64-v8a" }` in `TurtleTavern_Mobile/app/build.gradle.kts`
+- `MainActivity` shows an "Arch not supported" error if launched on non-arm64.
+- **arm64 AVD on an x86_64 Windows host is IMPOSSIBLE**: emulator panics
+  (`Avd's CPU Architecture 'arm64' is not supported by the QEMU2 emulator on x86_64 host`).
+  x86_64 AVDs boot but the app dies. Only real arm64 devices can test this app.
+
+### SQLite driver split (build tags)
+
+- `internal/character/driver_android.go` (`//go:build android`) → `mattn/go-sqlite3`, `CGO_ENABLED=1`
+- `internal/character/driver_desktop.go` (`//go:build !android`) → `modernc.org/sqlite`, `CGO_ENABLED=0`
+- **CGO is broken on the Windows host even for desktop builds** (TDM64 gcc produces a
+  PE file Windows refuses to run: `WinError 193`). Desktop must stay `CGO_ENABLED=0`.
+- Android builds need CGO anyway (DNS + TLS system roots), see the Termux section.
+
+## Android WebView Shell Gotchas (TurtleTavern_Mobile)
+
+- **Edge-to-edge is enforced for targetSdk 35+**. The system bars draw over the app
+  unless insets are applied manually.
+- **`DrawerLayout` ignores `setPadding()` during layout** — inset padding must go on the
+  plain content `FrameLayout` (and the drawer panel), NOT the DrawerLayout root.
+  WebView then reports the true `window.innerHeight` to the frontend (verified via
+  `window.innerHeight` = padded view height).
+- ST's viewport meta uses `viewport-fit=cover`; if the WebView is full-screen under
+  system bars, ST's top toolbar scrolls off-screen and the type box hides under the
+  nav bar. Padding the content frame fixes both.
+- `onPageFinished` never fires reliably (SSE streams keep the page "loading") — do not
+  use it for post-load JS injection.
+- In-app drawer (swipe from left edge): Config editor (`filesDir/config.yaml`), Logs,
+  Restart (`Gotavern.stop()` → `start()`, port may change → reload WebView URL).
+  Server logs are teed into a 256 KiB ring buffer via `gotavern.Logs()`
+  (`ringWriter` chains to the original `log.Writer()` so gomobile's logcat
+  forwarding still works).
+
+## Android / Termux Build (CRITICAL)
+
+### The DNS Pitfall
+
+`CGO_ENABLED=0` + `GOOS=android` → pure Go DNS resolver → **fails on Android** because Android has no `/etc/resolv.conf`. All outbound HTTP calls silently fail DNS.
+
+**Fix:** build with `CGO_ENABLED=1` and the Android NDK clang. This makes Go use Android's Bionic `getaddrinfo` which works.
+
+```bash
+# NDK location (Windows):
+# C:\Users\<user>\AppData\Local\Android\Sdk\ndk\<version>\toolchains\llvm\prebuilt\windows-x86_64\bin\aarch64-linux-android<api>-clang.cmd
+
+# Correct build command:
+CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
+  CC="<ndk-path>/bin/aarch64-linux-android21-clang.cmd" \
+  go build -trimpath -ldflags="-s -w" -o gotavern-termux-arm64 ./cmd/server
+```
+
+- Binary is ~36 MB (vs ~25 MB pure-Go) due to Bionic linkage
+- `GOOS=android` not `GOOS=linux` — the NDK targets Android API level, not generic Linux
+- The NDK must be installed: `sdkmanager "ndk;30.0.15729638"` or via Android Studio
+
+### TLS Certificates
+
+Pure-Go TLS (`CGO_ENABLED=0`) also fails on Android — no system CA roots. CGO fixes this too (Bionic provides them).
+
+### Termux Transfer
+
+```bash
+# adb push to device, then in Termux:
+chmod +x gotavern-termux-arm64
+./gotavern-termux-arm64
+```
+
+Needs `public/` and `config.yaml` alongside the binary.
+
+## Character Image Bug (Fixed 2026-09-14)
+
+**Root cause:** `EditAttribute`, `MergeAttributes`, and `Rename` handlers passed `nil` as the image data to `WriteCharacterDataToFile`. The function falls back to `DefaultAvatarPNG` when `inputImage == nil`:
+
+```go
+// process.go:173
+func WriteCharacterDataToFile(inputImage []byte, ...) error {
+    if inputImage == nil {
+        inputImage = DefaultAvatarPNG  // ← replaces character's image!
+    }
+    ...
+}
+```
+
+**Fix:** Read the existing PNG bytes before writing:
+```go
+imgBytes, _ := os.ReadFile(charPath)
+character.WriteCharacterDataToFile(imgBytes, string(charJSON), targetFile, uc.Directories)
+```
+
+**Lesson:** Any call to `WriteCharacterDataToFile` with `nil` as the first argument will destroy the character's image. Always read the existing file first. The only valid use of `nil` / `DefaultAvatarPNG` is when creating a **new** character from external import (CharX, YAML, BYAF) where no source image exists.
+
+## Frontend Caching (Fixed 2026-09-14)
+
+`index.html` loads JS modules with no cache-busting and the server had no `Cache-Control` headers. Browsers aggressively cache ES modules — users see stale frontend after code changes.
+
+**Fix:** `setStaticCachePolicy` in `cmd/server/main.go` adds `Cache-Control: no-cache` for `.js`, `.mjs`, `.html`, `.css`, `.json` files. Browser revalidates (304 when unchanged), picks up changes immediately.
+
+**User impact:** First load after update requires a hard refresh (Ctrl+Shift+R). After that, changes propagate automatically.
+
+## Backup/Restore Feature
+
+### Export (GET /api/users/backup)
+
+- Streams zip directly to response (constant memory, no temp file)
+- Appends `manifest.json` + `checksums.sha256` at the end (single pass)
+- `includeBackups` opt-in (skips `backups/` dir by default)
+- `includeKeys` → 400 unless `allowKeysExposure` is true in config
+- Optional `handle` param for admins backing up other users
+- `Cache-Control: no-cache` for download (prevents stale zip)
+
+### Restore (POST /api/users/restore)
+
+- Uses `r.MultipartReader()` (never `ParseMultipartForm`) — streams to temp file
+- Validates: manifest format/version, zip-slip rejection, per-file SHA-256, decompression bomb cap (1 TiB)
+- Extracts to staging dir, atomic rename swap with rollback
+- `maintenance.Begin()`/`End()` gates `/api` with 503 during swap
+- Clears character index after restore
+
+### Frontend
+
+- Export: native `<a download>` GET (browser streams to disk, no blob/RAM)
+- Restore: `XMLHttpRequest` with `xhr.upload.onprogress` for upload progress
+- Progress overlay lives in `document.body` (not inside the popup, which closes)
+- File picker uses `<label for="input">` pattern (ST globally hides `input[type=file]`)
+- `userDataBackup.html` has "Include chat backups" (opt-in) and "Include API keys" (disabled when `allowKeysExposure` false)
+
+## Routing Gotchas
+
+- Chi returns 405 when a path exists but the method doesn't (not 404)
+- Old `POST /api/users/backup` was removed; new route is `GET` — old frontend code POSTing gets 405
+- Static catch-all `r.Get("/*", ...)` serves `public/` — specific routes registered earlier take priority
+- `#account_button` in the User Settings drawer opens the profile popup (where backup/restore buttons live)
+
+## Build Commands
+
+```bash
+# Windows x64
+go build -o gotavern.exe ./cmd/server
+
+# Termux ARM64 (CRITICAL: CGO_ENABLED=1)
+CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
+  CC="<ndk>/bin/aarch64-linux-android21-clang.cmd" \
+  go build -trimpath -ldflags="-s -w" -o gotavern-termux-arm64 ./cmd/server
+
+# Verify (always run after changes)
+go build ./...
+go vet ./...
+python verify/endpoints.py        # 46/46
+python verify/backup_restore.py   # 21/21
+```
+
+## Key Files
+
+| File | Purpose |
+|---|---|
+| `cmd/server/main.go` | Entry point, router, middleware |
+| `internal/handlers/userdata.go` | Backup export/restore (new) |
+| `internal/handlers/characters.go` | Character CRUD (edit, rename, avatar) |
+| `internal/character/process.go` | `WriteCharacterDataToFile` (image preservation) |
+| `internal/character/png.go` | PNG chunk manipulation, `DefaultAvatarPNG` |
+| `internal/maintenance/maintenance.go` | 503 gate during restore swap |
+| `internal/llm/proxy.go` | `NewHTTPClient` (outbound HTTP) |
+| `verify/endpoints.py` | Full endpoint regression suite |
+| `verify/backup_restore.py` | Backup/restore round-trip test |
+| `public/scripts/user-data.js` | Frontend backup/restore logic |

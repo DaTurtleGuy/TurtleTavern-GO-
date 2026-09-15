@@ -1,0 +1,11 @@
+# local runtime artifacts
+data/
+dist/
+*.exe
+gotavern
+*.log
+
+# signing keys
+app/signing/
+*.jks
+*.keystore

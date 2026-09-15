@@ -1,0 +1,268 @@
+package handlers
+
+import (
+	"encoding/json"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/TurtleTavern/turtletavern/internal/models"
+	"github.com/TurtleTavern/turtletavern/internal/util"
+	"github.com/go-chi/chi/v5"
+)
+
+type GroupHandler struct{}
+
+func NewGroupHandler() *GroupHandler {
+	return &GroupHandler{}
+}
+
+func (h *GroupHandler) RegisterRoutes(r chi.Router) {
+	r.Route("/api/groups", func(r chi.Router) {
+		r.Post("/all", h.All)
+		r.Post("/create", h.Create)
+		r.Post("/edit", h.Edit)
+		r.Post("/delete", h.Delete)
+	})
+}
+
+func (h *GroupHandler) All(w http.ResponseWriter, r *http.Request) {
+	uc := getUserCtx(r)
+	if uc == nil {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	os.MkdirAll(uc.Directories.Groups, 0o755)
+
+	type groupResult struct {
+		models.GroupData
+		DateLastChat float64 `json:"date_last_chat"`
+		ChatSize     int64   `json:"chat_size"`
+	}
+	var groups []groupResult
+	groups = []groupResult{}
+
+	chatEntries, _ := os.ReadDir(uc.Directories.GroupChats)
+	chatNames := make(map[string]bool)
+	for _, ce := range chatEntries {
+		if !ce.IsDir() && strings.HasSuffix(ce.Name(), ".jsonl") {
+			chatNames[strings.TrimSuffix(ce.Name(), ".jsonl")] = true
+		}
+	}
+
+	files, err := os.ReadDir(uc.Directories.Groups)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]groupResult{})
+		return
+	}
+
+	for _, f := range files {
+		if f.IsDir() || !strings.HasSuffix(f.Name(), ".json") {
+			continue
+		}
+		var gd models.GroupData
+		filePath := filepath.Join(uc.Directories.Groups, f.Name())
+		if err := util.ReadJSONFile(filePath, &gd); err != nil {
+			continue
+		}
+
+		info, err := os.Stat(filePath)
+		if err == nil && gd.DateAdded == 0 {
+			gd.DateAdded = float64(info.ModTime().UnixMilli())
+			gd.CreateDate = time.UnixMilli(int64(gd.DateAdded)).Format(time.RFC3339)
+			util.WriteJSONFile(filePath, &gd)
+		}
+
+		var chatSize int64
+		dateLastChat := gd.DateLastChat
+		for _, chatID := range gd.Chats {
+			if !chatNames[chatID] {
+				continue
+			}
+			chatPath := filepath.Join(uc.Directories.GroupChats, chatID+".jsonl")
+			chatInfo, err := os.Stat(chatPath)
+			if err == nil {
+				chatSize += chatInfo.Size()
+				mtime := float64(chatInfo.ModTime().UnixMilli())
+				if mtime > dateLastChat {
+					dateLastChat = mtime
+				}
+			}
+		}
+		gd.DateLastChat = dateLastChat
+		gd.ChatSize = chatSize
+		groups = append(groups, groupResult{GroupData: gd})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(groups)
+}
+
+func (h *GroupHandler) Create(w http.ResponseWriter, r *http.Request) {
+	uc := getUserCtx(r)
+	if uc == nil {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	os.MkdirAll(uc.Directories.Groups, 0o755)
+
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	id := time.Now().Format("20060102150405000")
+
+	gd := models.GroupData{
+		ID:                       id,
+		Name:                     getStringFromBody(body, "name", "New Group"),
+		Members:                  getStringSliceFromBody(body, "members"),
+		AllowSelfResponses:       getBoolFromBody(body, "allow_self_responses"),
+		ActivationStrategy:       getIntFromBody(body, "activation_strategy"),
+		GenerationMode:           getIntFromBody(body, "generation_mode"),
+		ChatID:                   getStringFromBody(body, "chat_id", id),
+		AutoModeDelay:            getIntFromBody(body, "auto_mode_delay", 5),
+		GenerationModeJoinPrefix: getStringFromBody(body, "generation_mode_join_prefix"),
+		GenerationModeJoinSuffix: getStringFromBody(body, "generation_mode_join_suffix"),
+	}
+	if chats := body["chats"]; chats != nil {
+		gd.Chats = getStringSliceFromBody(body, "chats")
+	} else {
+		gd.Chats = []string{id}
+	}
+	if body["avatar_url"] != nil {
+		gd.AvatarURL, _ = body["avatar_url"].(string)
+	}
+	if body["disabled_members"] != nil {
+		gd.DisabledMembers = getStringSliceFromBody(body, "disabled_members")
+	}
+	if body["fav"] != nil {
+		gd.Fav = body["fav"]
+	}
+
+	pathToFile := filepath.Join(uc.Directories.Groups, util.SanitizeFileName(id+".json"))
+	util.WriteJSONFile(pathToFile, &gd)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(gd)
+}
+
+func (h *GroupHandler) Edit(w http.ResponseWriter, r *http.Request) {
+	uc := getUserCtx(r)
+	if uc == nil {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["id"] == nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if !validFileField(body, "id") {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	id, _ := body["id"].(string)
+	pathToFile := filepath.Join(uc.Directories.Groups, util.SanitizeFileName(id+".json"))
+	data, _ := json.MarshalIndent(body, "", "    ")
+	util.AtomicWrite(pathToFile, data)
+	w.Write([]byte(`{"ok":true}`))
+}
+
+func (h *GroupHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	uc := getUserCtx(r)
+	if uc == nil {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	var body struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if !validFileField(map[string]any{"id": body.ID}, "id") {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	pathToGroup := filepath.Join(uc.Directories.Groups, util.SanitizeFileName(body.ID+".json"))
+
+	var gd models.GroupData
+	if err := util.ReadJSONFile(pathToGroup, &gd); err == nil {
+		for _, chatID := range gd.Chats {
+			chatFile := filepath.Join(uc.Directories.GroupChats, util.SanitizeFileName(chatID+".jsonl"))
+			util.TryDeleteFile(chatFile)
+		}
+	}
+	util.TryDeleteFile(pathToGroup)
+	w.Write([]byte(`{"ok":true}`))
+}
+
+func getStringFromBody(m map[string]any, key string, def ...string) string {
+	v := m[key]
+	if v == nil {
+		if len(def) > 0 {
+			return def[0]
+		}
+		return ""
+	}
+	s, _ := v.(string)
+	if s == "" && len(def) > 0 {
+		return def[0]
+	}
+	return s
+}
+
+func getStringSliceFromBody(m map[string]any, key string) []string {
+	v := m[key]
+	if v == nil {
+		return []string{}
+	}
+	switch val := v.(type) {
+	case []any:
+		var result []string
+		for _, item := range val {
+			if s, ok := item.(string); ok {
+				result = append(result, s)
+			}
+		}
+		return result
+	case []string:
+		return val
+	default:
+		return []string{}
+	}
+}
+
+func getBoolFromBody(m map[string]any, key string) bool {
+	v := m[key]
+	if v == nil {
+		return false
+	}
+	b, _ := v.(bool)
+	return b
+}
+
+func getIntFromBody(m map[string]any, key string, def ...int) int {
+	v := m[key]
+	if v == nil {
+		if len(def) > 0 {
+			return def[0]
+		}
+		return 0
+	}
+	switch val := v.(type) {
+	case float64:
+		return int(val)
+	case int:
+		return val
+	default:
+		if len(def) > 0 {
+			return def[0]
+		}
+		return 0
+	}
+}
