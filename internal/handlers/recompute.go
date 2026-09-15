@@ -56,6 +56,13 @@ func (p *recomputeProgress) setPhase(phase string, total int) {
 	p.done = 0
 }
 
+func (p *recomputeProgress) setProgress(done, total int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.done = done
+	p.total = total
+}
+
 func (p *recomputeProgress) tick() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -99,34 +106,15 @@ func (h *CharacterHandler) RecomputeStatus(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, h.recompute.snapshot())
 }
 
-// recomputeAll re-derives every character's and group's "last used" time from
-// the chats themselves. Walking the library is far too expensive to do on each
-// listing, which is why recency is cached and this is an explicit action.
+// recomputeAll rebuilds the character index and then refreshes group recency.
+// The rebuild re-derives each character's last-used time from its own chats as it
+// goes (ProcessCharacter -> ChatStats), so one instrumented walk covers both the
+// index and the dates.
 func (h *CharacterHandler) recomputeAll(dirs models.UserDirectories) error {
-	entries, err := os.ReadDir(dirs.Characters)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-
-	var avatars []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".png") {
-			avatars = append(avatars, e.Name())
-		}
-	}
-	h.recompute.setPhase("characters", len(avatars))
-	for _, avatar := range avatars {
-		chatsDir := filepath.Join(dirs.Chats, strings.TrimSuffix(avatar, ".png"))
-		if _, ts := character.ChatStats(chatsDir); ts > 0 {
-			h.Index.UpdateDateLastChat(dirs.Characters, avatar, ts)
-		}
-		h.recompute.tick()
-	}
-
-	if err := h.recomputeGroups(dirs); err != nil {
-		return err
-	}
-	return nil
+	h.recompute.setPhase("characters", 0)
+	h.Index.RebuildIndexWithProgress(dirs.Characters, character.ProcessCharacter, dirs,
+		func(done, total int) { h.recompute.setProgress(done, total) })
+	return h.recomputeGroups(dirs)
 }
 
 // Group recency cannot be derived from anything cached per request without

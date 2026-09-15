@@ -12167,7 +12167,7 @@ jQuery(async function () {
         const statusEl = document.getElementById('recomputeStatus');
 
         const PHASE_LABELS = {
-            characters: 'Recomputing characters…',
+            characters: 'Rebuilding character index…',
             groups: 'Recomputing groups…',
             idle: 'Finalizing…',
         };
