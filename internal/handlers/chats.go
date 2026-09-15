@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/TurtleTavern/turtletavern/internal/character"
 	"github.com/TurtleTavern/turtletavern/internal/config"
 	"github.com/TurtleTavern/turtletavern/internal/models"
 	"github.com/TurtleTavern/turtletavern/internal/util"
@@ -23,10 +24,11 @@ import (
 type ChatHandler struct {
 	UseCharacterIndex bool
 	Cfg               *config.Config
+	Index             *character.Index
 }
 
-func NewChatHandler(cfg *config.Config) *ChatHandler {
-	return &ChatHandler{Cfg: cfg}
+func NewChatHandler(cfg *config.Config, idx *character.Index) *ChatHandler {
+	return &ChatHandler{Cfg: cfg, Index: idx}
 }
 
 func (h *ChatHandler) RegisterRoutes(r chi.Router) {
@@ -255,6 +257,13 @@ func (h *ChatHandler) Save(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"error":"An error has occurred, see the console logs for more information."}`))
 		return
+	}
+	// The character list is served from a cache, so record the new recency here
+	// instead of making the user press recompute after every message.
+	if h.Index != nil {
+		if ts := character.ChatFileRecency(chatFilePath); ts > 0 {
+			h.Index.UpdateDateLastChat(uc.Directories.Characters, body.AvatarURL, ts)
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"ok":true}`))

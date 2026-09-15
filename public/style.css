@@ -6430,3 +6430,28 @@ body:not(.movingUI) .drawer-content.maximized {
         border-width: 2px;
     }
 }
+
+#recomputeModal progress {
+    height: 8px;
+    border-radius: 4px;
+    appearance: none;
+    -webkit-appearance: none;
+    overflow: hidden;
+}
+
+#recomputeModal progress::-webkit-progress-bar {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+}
+
+#recomputeModal progress::-webkit-progress-value {
+    background: var(--SmartThemeBorderColor, #4fc3f7);
+    border-radius: 4px;
+    transition: width 0.15s ease;
+}
+
+#recomputeModal progress::-moz-progress-bar {
+    background: var(--SmartThemeBorderColor, #4fc3f7);
+    border-radius: 4px;
+    transition: width 0.15s ease;
+}

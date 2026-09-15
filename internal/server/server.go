@@ -111,7 +111,7 @@ func Build(cfg *config.Config, publicDir string) (*Instance, error) {
 		session.RegisterUserFileRoutes(r)
 
 		handlers.NewCharacterHandler(charIndex).RegisterRoutes(r)
-		handlers.NewChatHandler(cfg).RegisterRoutes(r)
+		handlers.NewChatHandler(cfg, charIndex).RegisterRoutes(r)
 		handlers.NewGroupHandler().RegisterRoutes(r)
 		handlers.NewSettingsHandler(cfg).RegisterRoutes(r)
 		handlers.NewSecretsHandler(cfg).RegisterRoutes(r)
