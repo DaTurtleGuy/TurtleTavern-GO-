@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // How much of a chat file to read when hunting for its last message. Chat
@@ -14,6 +16,64 @@ const tailReadBytes = 256 << 10
 
 // How much of a chat file to read when hunting for its first message.
 const headReadBytes = 64 << 10
+
+// send_date has two shapes in the wild. Older SillyTavern wrote a human-readable
+// string ("February 25, 2025 3:46pm"); newer versions write epoch milliseconds.
+// A library restored from an old backup is full of the former, and only accepting
+// the latter silently falls through to file mtime.
+var sendDateLayouts = []string{
+	"January 2, 2006 3:04pm",
+	"January 2, 2006 3:04 pm",
+	"January 2, 2006 15:04",
+	"Jan 2, 2006 3:04pm",
+	"Jan 2, 2006 15:04",
+	time.RFC3339,
+	time.RFC3339Nano,
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04:05",
+}
+
+// parseSendDate converts a send_date value in any known shape to epoch
+// milliseconds. Plain numbers are treated as seconds when they look too small to
+// be milliseconds.
+func parseSendDate(raw string) (float64, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	if n, err := strconv.ParseFloat(raw, 64); err == nil {
+		if n > 1e11 {
+			return n, true
+		}
+		return n * 1000, true
+	}
+	for _, candidate := range []string{raw, titleCaseFirst(raw)} {
+		for _, layout := range sendDateLayouts {
+			if ts, err := time.Parse(layout, candidate); err == nil {
+				return float64(ts.UnixMilli()), true
+			}
+		}
+	}
+	return 0, false
+}
+
+func titleCaseFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// messageSendDate pulls send_date out of one chat record, in either shape.
+func messageSendDate(line string) (float64, bool) {
+	var msg struct {
+		SendDate json.RawMessage `json:"send_date"`
+	}
+	if err := json.Unmarshal([]byte(line), &msg); err != nil || len(msg.SendDate) == 0 {
+		return 0, false
+	}
+	return parseSendDate(strings.Trim(strings.TrimSpace(string(msg.SendDate)), `"`))
+}
 
 // ChatFileSendDate reports the send_date of a chat file's last message; ok is
 // false when the file carries no timestamped message.
@@ -71,8 +131,10 @@ func ChatStats(charDir string) (int64, float64) {
 			continue
 		}
 		size += info.Size()
-		ts := chatFileRecency(filepath.Join(charDir, e.Name()), float64(info.ModTime().UnixMilli()))
-		if ts > recency {
+		// Only a real message timestamp counts as "used". File mtime deliberately
+		// does not: after a restore every chat shares the extraction time, and a
+		// chat holding nothing but metadata has no usage to report at all.
+		if ts, ok := lastSendDate(filepath.Join(charDir, e.Name())); ok && ts > recency {
 			recency = ts
 		}
 	}
@@ -122,16 +184,7 @@ func firstSendDate(path string) (float64, bool) {
 		if line == "" {
 			continue
 		}
-		var msg struct {
-			SendDate json.Number `json:"send_date"`
-		}
-		if err := json.Unmarshal([]byte(line), &msg); err != nil {
-			continue
-		}
-		if msg.SendDate == "" {
-			continue
-		}
-		if ts, err := msg.SendDate.Float64(); err == nil {
+		if ts, ok := messageSendDate(line); ok {
 			return ts, true
 		}
 	}
@@ -164,16 +217,7 @@ func lastSendDate(path string) (float64, bool) {
 		if line == "" {
 			continue
 		}
-		var msg struct {
-			SendDate json.Number `json:"send_date"`
-		}
-		if err := json.Unmarshal([]byte(line), &msg); err != nil {
-			continue
-		}
-		if msg.SendDate == "" {
-			continue
-		}
-		if ts, err := msg.SendDate.Float64(); err == nil {
+		if ts, ok := messageSendDate(line); ok {
 			return ts, true
 		}
 	}
