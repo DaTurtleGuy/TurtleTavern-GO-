@@ -81,6 +81,12 @@ func ChatFileSendDate(path string) (float64, bool) {
 	return lastSendDate(path)
 }
 
+// ChatFileFirstSendDate reports the send_date of a chat file's first message,
+// which is the earliest point that chat is known to exist.
+func ChatFileFirstSendDate(path string) (float64, bool) {
+	return firstSendDate(path)
+}
+
 // ChatOldestSendDate returns the earliest message timestamp across charDir's
 // chats. It is the floor for a creation date: a card cannot predate its own
 // oldest message, so a creation date that does was written by an import.

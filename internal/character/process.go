@@ -37,17 +37,18 @@ func ProcessCharacter(item string, dirs models.UserDirectories, shallow bool) (*
 	}
 
 	charStat, _ := os.Stat(imgFile)
-	ctimeMs := 0.0
-	if charStat != nil {
-		ctimeMs = float64(charStat.ModTime().UnixMilli())
-	}
-
-	dateAdded := ctimeMs
-	if v, ok := dateAddedData[fileNameWithoutExt]; ok {
-		dateAdded = v
-	}
+	dateAdded, hasEntry := dateAddedData[fileNameWithoutExt]
 	needSave := false
-	if _, ok := dateAddedData[fileNameWithoutExt]; !ok {
+	if !hasEntry {
+		// A missing entry must not be filled from the PNG mtime: after a restore that
+		// is the copy time, and it is how creation dates ended up newer than a card's
+		// own oldest message. Earliest message evidence wins; the file time is only a
+		// last resort for a character with no chats at all.
+		if oldest, ok := ChatOldestSendDate(filepath.Join(dirs.Chats, fileNameWithoutExt)); ok {
+			dateAdded = oldest
+		} else if charStat != nil {
+			dateAdded = float64(charStat.ModTime().UnixMilli())
+		}
 		dateAddedData[fileNameWithoutExt] = dateAdded
 		needSave = true
 	}
@@ -109,13 +110,13 @@ func ProcessCharacterFull(item string, dirs models.UserDirectories) (map[string]
 	}
 	fileNameWithoutExt := strings.TrimSuffix(item, ".png")
 	charStat, _ := os.Stat(imgFile)
-	ctimeMs := 0.0
-	if charStat != nil {
-		ctimeMs = float64(charStat.ModTime().UnixMilli())
-	}
-	dateAdded := ctimeMs
-	if v, ok := dateAddedData[fileNameWithoutExt]; ok {
-		dateAdded = v
+	dateAdded, hasEntry := dateAddedData[fileNameWithoutExt]
+	if !hasEntry {
+		if oldest, ok := ChatOldestSendDate(filepath.Join(dirs.Chats, fileNameWithoutExt)); ok {
+			dateAdded = oldest
+		} else if charStat != nil {
+			dateAdded = float64(charStat.ModTime().UnixMilli())
+		}
 	}
 
 	result, wasFixed := GetCharaCardV2(charJSON, dirs)

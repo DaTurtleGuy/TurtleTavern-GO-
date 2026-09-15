@@ -247,14 +247,28 @@ func (h *CharacterHandler) recomputeGroups(dirs models.UserDirectories) error {
 		var gd models.GroupData
 		if err := util.ReadJSONFile(path, &gd); err == nil {
 			var newest float64
+			var oldest float64
 			for _, chatID := range gd.Chats {
 				chatPath := filepath.Join(dirs.GroupChats, chatID+".jsonl")
 				if ts := character.ChatFileRecency(chatPath); ts > newest {
 					newest = ts
 				}
+				if ts, ok := character.ChatFileFirstSendDate(chatPath); ok && (oldest == 0 || ts < oldest) {
+					oldest = ts
+				}
 			}
+			changed := false
 			if newest > 0 && newest != gd.DateLastChat {
 				gd.DateLastChat = newest
+				changed = true
+			}
+			// Same rule as characters: a group cannot predate its own oldest message.
+			if oldest > 0 && (gd.DateAdded == 0 || gd.DateAdded > oldest) {
+				gd.DateAdded = oldest
+				gd.CreateDate = time.UnixMilli(int64(oldest)).UTC().Format(time.RFC3339)
+				changed = true
+			}
+			if changed {
 				util.WriteJSONFile(path, &gd)
 			}
 		}

@@ -65,13 +65,9 @@ func (h *GroupHandler) All(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		info, err := os.Stat(filePath)
-		if err == nil && gd.DateAdded == 0 {
-			gd.DateAdded = float64(info.ModTime().UnixMilli())
-			gd.CreateDate = time.UnixMilli(int64(gd.DateAdded)).Format(time.RFC3339)
-			util.WriteJSONFile(filePath, &gd)
-		}
-
+		// Creation dates are repaired by the recompute action, never here: this used
+		// to backfill date_added from the group file's mtime, so every listing after
+		// a restore stamped old groups with the copy time.
 		var chatSize int64
 		var dateLastChat float64
 		for _, chatID := range gd.Chats {
