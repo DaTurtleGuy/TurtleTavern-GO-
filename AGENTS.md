@@ -10,19 +10,6 @@ Go rewrite of SillyTavern's backend. Serves the **unchanged** SillyTavern fronte
 - Go 1.26, pure Go deps (chi, tiktoken, yaml.v3, modernc.org/sqlite)
 - No git repo — local-only
 
-## Release Checklist (GitHub)
-
-1. `go build ./... && go vet ./...`
-2. `python verify/endpoints.py` (46/46) + `python verify/backup_restore.py` (21/21)
-3. Rebuild dist: `Windows-x64.zip` (exe + public + default + config.yaml) and
-   `Termux-arm64.tar.gz` (arm64 binary + public + default + config.yaml)
-4. Bump the Android app (`versionName` / `versionCode`), rebuild its
-   `bootstrap.zip` from THIS repo (`tools/pack_mobile_assets.py`) and the AAR
-   (`gomobile bind -target=android/arm64 ...`), then assembleRelease
-5. GitHub release: APK + Windows zip + Termux tar.gz, with notes pointing
-   Node users at `public/MIGRATION.md`
-6. Never commit `data/`, `dist/`, signing keystores, or real user configs
-
 ## Node.js (TurtleTavern) Backup/Restore Parity (2026-09-14)
 
 The Node fork has the same feature set, wire-compatible in both directions:

@@ -1,10 +1,10 @@
 package handlers
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -185,19 +185,31 @@ func (h *ChatHandler) trySaveChat(chatData []map[string]any, filePath, handle, c
 func getChatData(chatFilePath string) []map[string]any {
 	data, err := os.ReadFile(chatFilePath)
 	if err != nil {
+		log.Printf("[Chats] cannot read chat file %s: %v", chatFilePath, err)
 		return nil
 	}
 	var result []map[string]any
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	skipped := 0
+	// strings.Split, not bufio.Scanner: Scanner's default 64 KiB token limit
+	// silently aborts on the first oversized line (one long roleplay message is
+	// enough) and truncates the rest of the chat.
+	for i, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
 		}
 		var msg map[string]any
-		if json.Unmarshal([]byte(line), &msg) == nil {
-			result = append(result, msg)
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			skipped++
+			if skipped <= 5 {
+				log.Printf("[Chats] skipping malformed line %d in %s: %v", i+1, filepath.Base(chatFilePath), err)
+			}
+			continue
 		}
+		result = append(result, msg)
+	}
+	if skipped > 0 {
+		log.Printf("[Chats] %s: loaded %d messages, skipped %d malformed lines", filepath.Base(chatFilePath), len(result), skipped)
 	}
 	return result
 }
@@ -288,6 +300,7 @@ func (h *ChatHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if data == nil {
 		data = []map[string]any{}
 	}
+	log.Printf("[Chats] loaded %q for %q: %d messages", body.FileName, body.AvatarURL, len(data))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
 }
@@ -420,9 +433,10 @@ func (h *ChatHandler) Export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var buffer strings.Builder
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	// Same 64 KiB scanner trap as getChatData: one long message used to cut
+	// the exported transcript short.
+	for _, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
 		}
