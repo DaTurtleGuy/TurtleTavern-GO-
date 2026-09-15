@@ -12146,6 +12146,18 @@ jQuery(async function () {
         const $btn = $(this);
         if ($btn.hasClass('disabled')) return;
 
+        // The pass rewrites character cards, group files and the index, so it gets a
+        // confirmation rather than firing on a stray tap. Cancelling costs nothing.
+        const confirmed = await callGenericPopup(
+            t`Rebuild the character index?<br><br>This re-reads every character and group, rebuilds the index, and corrects last-used and creation dates that are wrong. It rewrites those files, can take a while on a large library, and cannot be cancelled once it starts.`,
+            POPUP_TYPE.CONFIRM,
+            null,
+            { okButton: t`Rebuild`, cancelButton: t`Cancel` },
+        );
+        if (confirmed !== POPUP_RESULT.AFFIRMATIVE) {
+            return;
+        }
+
         $btn.addClass('disabled');
 
         const overlay = document.createElement('div');
