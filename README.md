@@ -10,11 +10,9 @@ Origin: the Node-based TurtleTavern fork — https://github.com/DaTurtleGuy/Turt
 
 Genuinely vibe-coded. Built with OpenCode — orchestrating multiple models as my
 whims dictated: GLM 5.3 Flash, DeepSeek V4.1 Flash, Mimo 2.5, among others.
-This is my first *real* project ever and I will tell you right now: I have no
-formal clue what I'm doing. Expect asymmetric polish: some corners are hardened
-by regression suites, others survived by being touched fewer times.
-`AGENTS.md` is the scar-tissue knowledge base — when something breaks, check
-there first.
+Expect asymmetric polish: some corners are hardened by regression suites,
+others survived by being touched fewer times. `AGENTS.md` is the scar-tissue
+knowledge base — when something breaks, check there first.
 
 
 
