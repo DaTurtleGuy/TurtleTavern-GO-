@@ -123,28 +123,27 @@ restores `LstdFlags|Lmicroseconds`.
 ## Chat dates: last-used and created (2026-09-15)
 
 Two dates drive the character/group lists, and each was wrong in a different way. These
-rules are load-bearing; each one was measured against a real 1,050-character restored
-library before it was written down.
+rules are load-bearing; each was found by measuring a real restored library.
 
 - **`send_date` has two shapes.** Older SillyTavern wrote a human-readable string
   (`"February 25, 2025 3:46pm"`); newer versions write epoch ms. `parseSendDate` accepts
   both, plus ISO timestamps and epoch seconds. A parser that only accepts numbers matches
-  **nothing** in an old library — it matched 0 of 4,227 chat files, so recency silently
-  fell back to file mtime. Unit tests in `internal/character/recency_test.go` pin the real
-  string formats; do not "simplify" them to numbers.
+  **nothing** in an old library — in testing it matched none of the chat files, so recency
+  silently fell back to file mtime. Unit tests in `internal/character/recency_test.go` pin
+  the real string formats; do not "simplify" them to numbers.
 - **File mtime is never recency or creation evidence.** A restore, import or copy rewrites
-  it to the copy time. It fabricated 1,007 identical values in that library and outranked
-  genuine dates for 18 more.
+  it to the copy time. In testing it fabricated identical, "just now" values across most of
+  the library, and outranked genuine dates in other cases.
 - **A card or group cannot predate its own oldest message.** The recompute clamps creation
   dates to the oldest message (`ChatOldestSendDate` / `ChatFileFirstSendDate`), writing the
   card and `date_added.json`. It must stay idempotent: a second run must report 0 changes.
 - **`date_last_chat` / `chat_size` must not use `omitempty`.** A 0 was omitted from the
   JSON, the frontend compared `undefined`, and `undefined - number` produced an
-  inconsistent comparator — V8 scattered ~1,000 characters into arbitrary order.
+  inconsistent comparator — V8 scattered large parts of the list into arbitrary order.
 - **Group files written by Node-ST are not type-compatible.** Numeric `id`, boolean
   `activation_strategy`, numeric `chats` entries: a strict decode rejects the record and the
-  group disappears from the API entirely (43 of 155 were missing). `GroupData.UnmarshalJSON`
-  coerces every field leniently — keep it that way.
+  group disappears from the API entirely (a chunk of a real library's groups were missing).
+  `GroupData.UnmarshalJSON` coerces every field leniently — keep it that way.
 - **Listings must never write files.** Group creation dates used to be backfilled from the
   group file's mtime *inside the GET handler*, stamping old groups with the restore time.
   Repairs belong to the recompute action only.
