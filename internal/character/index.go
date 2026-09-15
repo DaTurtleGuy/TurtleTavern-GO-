@@ -233,6 +233,12 @@ func (idx *Index) clearUserIndex(userFolder string) {
 }
 
 func (idx *Index) RebuildIndex(userFolder string, processFn func(string, models.UserDirectories, bool) (*models.ShallowCharacter, error), dirs models.UserDirectories) []models.ShallowCharacter {
+	return idx.RebuildIndexWithProgress(userFolder, processFn, dirs, nil)
+}
+
+// RebuildIndexWithProgress is RebuildIndex while reporting how many characters
+// have been handled, so a caller can drive a progress bar. onProgress may be nil.
+func (idx *Index) RebuildIndexWithProgress(userFolder string, processFn func(string, models.UserDirectories, bool) (*models.ShallowCharacter, error), dirs models.UserDirectories, onProgress func(done, total int)) []models.ShallowCharacter {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 	idx.clearUserIndex(userFolder)
@@ -240,17 +246,31 @@ func (idx *Index) RebuildIndex(userFolder string, processFn func(string, models.
 	if err != nil {
 		return nil
 	}
-	var results []models.ShallowCharacter
+
+	var pngs []string
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".png") {
-			continue
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".png") {
+			pngs = append(pngs, e.Name())
 		}
-		char, err := processFn(e.Name(), dirs, true)
+	}
+	if onProgress != nil {
+		onProgress(0, len(pngs))
+	}
+
+	var results []models.ShallowCharacter
+	for i, name := range pngs {
+		char, err := processFn(name, dirs, true)
 		if err != nil || char == nil || char.Name == "" {
+			if onProgress != nil {
+				onProgress(i+1, len(pngs))
+			}
 			continue
 		}
 		idx.upsertCharacter(userFolder, *char)
 		results = append(results, *char)
+		if onProgress != nil {
+			onProgress(i+1, len(pngs))
+		}
 	}
 	return results
 }
