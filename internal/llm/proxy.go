@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -57,6 +58,24 @@ func ForwardStream(upstream *http.Response, w http.ResponseWriter, r *http.Reque
 	status := upstream.StatusCode
 	if status == http.StatusUnauthorized {
 		status = http.StatusBadRequest
+	}
+	if upstream.StatusCode >= 400 {
+		// Error payloads are small; buffer so the provider's reason reaches the log.
+		body, _ := io.ReadAll(io.LimitReader(upstream.Body, 64<<10))
+		_ = upstream.Body.Close()
+		where := "upstream"
+		if upstream.Request != nil && upstream.Request.URL != nil {
+			where = upstream.Request.URL.Host + upstream.Request.URL.Path
+		}
+		log.Printf("[llm] %s returned %d: %s", where, upstream.StatusCode, preview(body, 600))
+		if ct := upstream.Header.Get("Content-Type"); ct != "" {
+			w.Header().Set("Content-Type", ct)
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write(body)
+		return
 	}
 	for k, vv := range upstream.Header {
 		if strings.EqualFold(k, "Content-Length") || strings.EqualFold(k, "Transfer-Encoding") {

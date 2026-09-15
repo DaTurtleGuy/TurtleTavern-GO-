@@ -71,6 +71,43 @@ Cause: seccomp prevented call to disallowed x86_64 system call 6
   (`ringWriter` chains to the original `log.Writer()` so gomobile's logcat
   forwarding still works).
 
+## Background Generation — ROOT CAUSE & LOG CONVENTIONS (2026-09-15)
+
+Symptom: leaving the app mid-generation killed it, and the access log showed
+`POST /api/backends/chat-completions/generate -> 502`.
+
+**The wake lock was never actually held.** `MainActivity.onCreate` restored the
+switch with `keepAliveSwitch.isChecked = prefs.getBoolean(...)` *before* attaching
+`setOnCheckedChangeListener`, so the restored value never fired the listener: the
+drawer showed ON, `KeepAliveService` was never started, and no
+`PARTIAL_WAKE_LOCK` existed. Proved with `adb shell dumpsys activity services`
+(no KeepAliveService) + `dumpsys power` (no `turtletavern::server` lock) while
+the pref read `keep_alive = true`. Without a foreground service the app is a
+cached process and Android reaps its sockets mid-stream.
+
+- `applyKeepAlive()` is now re-applied in `onStart()` from the pref. **Do not
+  delete that line as redundant — it is the fix.** Verified: `applyKeepAlive(true)`
+  → `KeepAlive service starting` → `PARTIAL_WAKE_LOCK acquired` → a generation
+  logged `-> 200 (29.45s)` that ran *entirely* while the app was backgrounded.
+- `webView.setRendererPriorityPolicy(RENDERER_PRIORITY_IMPORTANT, false)` keeps the
+  invisible renderer from being waived/frozen. It is an **instance** method, not
+  static. `setRendererPriorityPolicy` does not appear in Kotlin completion — check
+  the SDK jar with `javap` before trusting memory here.
+
+**A 502 is not automatically a provider error.** Read the `[llm]` line next to it:
+- `[llm] ... aborted: the caller went away (context canceled)` + `-> 499`:
+  the frontend aborted the fetch itself (swipe/stop). Expected, not a failure.
+- `[llm] ... failed: <error>`: real outbound failure (DNS/TCP/TLS).
+- `[llm] <host> returned <status>: <body>`: the provider rejected it, body included.
+
+Upstream failures used to be logged only when `Debug` was on, so every 502 was
+invisible and the error body was thrown away. Keep `logUpstreamFailure`, the
+`writeUpstreamFailure` 499 branch, and the `ForwardStream` >=400 branch.
+
+`gomobile` calls `log.SetFlags(0)`, so server lines reached the in-app viewer with
+no timestamp and could not be correlated with the app log. `gotavern.Start`
+restores `LstdFlags|Lmicroseconds`.
+
 ## Android / Termux Build (CRITICAL)
 
 ### The DNS Pitfall
