@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/TurtleTavern/turtletavern/internal/character"
 	"github.com/TurtleTavern/turtletavern/internal/models"
@@ -106,15 +107,120 @@ func (h *CharacterHandler) RecomputeStatus(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, h.recompute.snapshot())
 }
 
-// recomputeAll rebuilds the character index and then refreshes group recency.
-// The rebuild re-derives each character's last-used time from its own chats as it
-// goes (ProcessCharacter -> ChatStats), so one instrumented walk covers both the
-// index and the dates.
+// recomputeAll repairs creation dates, rebuilds the character index and then
+// refreshes group recency. Creation dates are fixed first so the rebuild reads
+// the corrected values from date_added.json.
 func (h *CharacterHandler) recomputeAll(dirs models.UserDirectories) error {
+	h.recompute.setPhase("dates", 0)
+	h.clampCreationDates(dirs)
+
 	h.recompute.setPhase("characters", 0)
 	h.Index.RebuildIndexWithProgress(dirs.Characters, character.ProcessCharacter, dirs,
 		func(done, total int) { h.recompute.setProgress(done, total) })
+
 	return h.recomputeGroups(dirs)
+}
+
+type dateAddedMap map[string]float64
+
+func readDateAdded(path string) dateAddedMap {
+	m := dateAddedMap{}
+	if data, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(data, &m)
+	}
+	return m
+}
+
+// clampCreationDates lowers any creation date that postdates the character's own
+// oldest message. That combination cannot be real: it only appears when a card
+// was imported or restored, and it is what makes "Newest/Oldest" useless
+// afterwards. The oldest message is the earliest evidence the character existed,
+// so it becomes the creation date, in the card and in date_added.json alike.
+func (h *CharacterHandler) clampCreationDates(dirs models.UserDirectories) {
+	entries, err := os.ReadDir(dirs.Characters)
+	if err != nil {
+		return
+	}
+	var avatars []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".png") {
+			avatars = append(avatars, e.Name())
+		}
+	}
+	h.recompute.setProgress(0, len(avatars))
+
+	dateAddedFile := filepath.Join(dirs.Characters, "date_added.json")
+	dateAdded := readDateAdded(dateAddedFile)
+	dirty := false
+
+	for i, avatar := range avatars {
+		name := strings.TrimSuffix(avatar, ".png")
+		oldest, ok := character.ChatOldestSendDate(filepath.Join(dirs.Chats, name))
+		if ok {
+			if cardDate, err := cardCreateDate(filepath.Join(dirs.Characters, avatar)); err == nil &&
+				cardDate > 0 && cardDate > oldest {
+				setCardCreateDate(filepath.Join(dirs.Characters, avatar), oldest)
+			}
+			if added, ok := dateAdded[name]; !ok || added > oldest {
+				if !ok || added != oldest {
+					dateAdded[name] = oldest
+					dirty = true
+				}
+			}
+		}
+		h.recompute.setProgress(i+1, len(avatars))
+	}
+
+	if dirty {
+		if data, err := json.MarshalIndent(dateAdded, "", "    "); err == nil {
+			_ = util.AtomicWrite(dateAddedFile, data)
+		}
+	}
+}
+
+func cardCreateDate(path string) (float64, error) {
+	raw, err := character.ReadCharacterDataFromFile(path)
+	if err != nil {
+		return 0, err
+	}
+	var card map[string]any
+	if err := json.Unmarshal([]byte(raw), &card); err != nil {
+		return 0, err
+	}
+	value, _ := card["create_date"].(string)
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return 0, err
+	}
+	return float64(parsed.UnixMilli()), nil
+}
+
+func setCardCreateDate(path string, ts float64) {
+	img, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	raw, err := character.ReadCharacterDataFromFile(path)
+	if err != nil {
+		return
+	}
+	var card map[string]any
+	if err := json.Unmarshal([]byte(raw), &card); err != nil {
+		return
+	}
+	card["create_date"] = time.UnixMilli(int64(ts)).UTC().Format("2006-01-02T15:04:05.000Z")
+	out, err := json.Marshal(card)
+	if err != nil {
+		return
+	}
+	png, err := character.WriteCharacterDataToPNG(img, string(out))
+	if err != nil {
+		return
+	}
+	_ = util.AtomicWrite(path, png)
 }
 
 // Group recency cannot be derived from anything cached per request without

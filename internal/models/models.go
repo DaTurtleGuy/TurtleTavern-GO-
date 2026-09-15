@@ -176,8 +176,8 @@ type GroupData struct {
 	GenerationModeJoinSuffix string   `json:"generation_mode_join_suffix"`
 	DateAdded                float64  `json:"date_added,omitempty"`
 	CreateDate               string   `json:"create_date,omitempty"`
-	DateLastChat             float64  `json:"date_last_chat,omitempty"`
-	ChatSize                 int64    `json:"chat_size,omitempty"`
+	DateLastChat             float64  `json:"date_last_chat"`
+	ChatSize                 int64    `json:"chat_size"`
 }
 
 // Crop defines avatar crop parameters from the frontend.
