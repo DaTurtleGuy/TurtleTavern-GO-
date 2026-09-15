@@ -1,0 +1,16 @@
+<div class="flex-container flexFlowColumn flexGap10" style="width: 100%;">
+    <div>
+        <h3 data-i18n="Warning: Destructive Action">Warning: Destructive Action</h3>
+        <p data-i18n="Restoring a backup will REPLACE all of your current data (settings, characters, chats, and extensions) with the contents of the archive. This cannot be undone.">
+            Restoring a backup will REPLACE all of your current data (settings, characters, chats, and extensions) with the contents of the archive. This cannot be undone.
+        </p>
+    </div>
+    <div class="flex-container flexGap10 alignitemscenter">
+        <label class="menu_button menu_button_icon" for="userDataRestoreFile">
+            <i class="fa-fw fa-solid fa-folder-open"></i>
+            <span data-i18n="Choose backup file…">Choose backup file…</span>
+        </label>
+        <small class="userDataRestoreFileName opacity50p" data-i18n="No file selected.">No file selected.</small>
+    </div>
+    <input id="userDataRestoreFile" type="file" accept=".zip,application/zip">
+</div>
