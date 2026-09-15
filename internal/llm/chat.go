@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -215,6 +217,38 @@ func writeUpstreamError(w http.ResponseWriter, status int, message string, quota
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": message}, "quota_error": quota})
+}
+
+// Distinguishes "caller went away" from a real connect failure on the 502 path.
+func logUpstreamFailure(what, endpoint string, err error) {
+	where := redactEndpoint(endpoint)
+	switch {
+	case errors.Is(err, context.Canceled):
+		log.Printf("[llm] %s %s aborted: the caller went away (context canceled)", what, where)
+	case errors.Is(err, context.DeadlineExceeded):
+		log.Printf("[llm] %s %s timed out: %v", what, where, err)
+	default:
+		log.Printf("[llm] %s %s failed: %v", what, where, err)
+	}
+}
+
+// The frontend aborts the fetch on swipe/stop, which lands here as context.Canceled.
+// 499 keeps the access log from blaming the provider for a user-initiated abort.
+func writeUpstreamFailure(w http.ResponseWriter, what, endpoint string, err error) {
+	logUpstreamFailure(what, endpoint, err)
+	if errors.Is(err, context.Canceled) {
+		writeUpstreamError(w, 499, connectErrorMessage(err), false)
+		return
+	}
+	writeUpstreamError(w, http.StatusBadGateway, connectErrorMessage(err), false)
+}
+
+// redactEndpoint drops the query string, which is where some providers put the API key.
+func redactEndpoint(endpoint string) string {
+	if u, err := url.Parse(endpoint); err == nil && u.Host != "" {
+		return u.Scheme + "://" + u.Host + u.Path
+	}
+	return "upstream"
 }
 
 func (h *ChatHandler) finishNonStream(w http.ResponseWriter, res *UpstreamResult, provider string) {
@@ -674,7 +708,7 @@ func (h *ChatHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	if stream {
 		upstream, err := DoStream(h.client, r.Context(), http.MethodPost, endpoint, outHeaders, requestBody)
 		if err != nil {
-			writeUpstreamError(w, http.StatusBadGateway, connectErrorMessage(err), false)
+			writeUpstreamFailure(w, "stream request", endpoint, err)
 			return
 		}
 		ForwardStream(upstream, w, r)
@@ -682,7 +716,7 @@ func (h *ChatHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := DoJSON(h.client, r.Context(), http.MethodPost, endpoint, outHeaders, requestBody)
 	if err != nil {
-		writeUpstreamError(w, http.StatusBadGateway, connectErrorMessage(err), false)
+		writeUpstreamFailure(w, "request", endpoint, err)
 		return
 	}
 	h.finishNonStream(w, res, source)
