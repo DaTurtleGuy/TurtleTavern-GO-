@@ -12,6 +12,41 @@ import (
 // multi-gigabyte chat never has to be read in full.
 const tailReadBytes = 256 << 10
 
+// How much of a chat file to read when hunting for its first message.
+const headReadBytes = 64 << 10
+
+// ChatFileSendDate reports the send_date of a chat file's last message; ok is
+// false when the file carries no timestamped message.
+func ChatFileSendDate(path string) (float64, bool) {
+	return lastSendDate(path)
+}
+
+// ChatOldestSendDate returns the earliest message timestamp across charDir's
+// chats. It is the floor for a creation date: a card cannot predate its own
+// oldest message, so a creation date that does was written by an import.
+func ChatOldestSendDate(charDir string) (float64, bool) {
+	entries, err := os.ReadDir(charDir)
+	if err != nil {
+		return 0, false
+	}
+	var oldest float64
+	found := false
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		ts, ok := firstSendDate(filepath.Join(charDir, e.Name()))
+		if !ok {
+			continue
+		}
+		if !found || ts < oldest {
+			oldest = ts
+			found = true
+		}
+	}
+	return oldest, found
+}
+
 // ChatStats returns the total size of the chat files in charDir and the time of
 // the most recent activity in it.
 //
@@ -59,6 +94,48 @@ func chatFileRecency(path string, fallback float64) float64 {
 		return ts
 	}
 	return fallback
+}
+
+// firstSendDate reads the head of a chat file and returns the send_date of its
+// first message, the earliest point at which the chat is known to exist.
+func firstSendDate(path string) (float64, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, false
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil || info.Size() == 0 {
+		return 0, false
+	}
+	size := info.Size()
+	if size > headReadBytes {
+		size = headReadBytes
+	}
+	buf := make([]byte, size)
+	if _, err := f.ReadAt(buf, 0); err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(string(buf), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var msg struct {
+			SendDate json.Number `json:"send_date"`
+		}
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			continue
+		}
+		if msg.SendDate == "" {
+			continue
+		}
+		if ts, err := msg.SendDate.Float64(); err == nil {
+			return ts, true
+		}
+	}
+	return 0, false
 }
 
 func lastSendDate(path string) (float64, bool) {

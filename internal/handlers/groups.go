@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TurtleTavern/turtletavern/internal/character"
 	"github.com/TurtleTavern/turtletavern/internal/models"
 	"github.com/TurtleTavern/turtletavern/internal/util"
 	"github.com/go-chi/chi/v5"
@@ -72,16 +73,25 @@ func (h *GroupHandler) All(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var chatSize int64
-		dateLastChat := gd.DateLastChat
+		var dateLastChat float64
 		for _, chatID := range gd.Chats {
 			if !chatNames[chatID] {
 				continue
 			}
 			chatPath := filepath.Join(uc.Directories.GroupChats, chatID+".jsonl")
 			chatInfo, err := os.Stat(chatPath)
-			if err == nil {
-				chatSize += chatInfo.Size()
+			if err != nil {
+				continue
 			}
+			chatSize += chatInfo.Size()
+			// The last message in the chats is the truth. The value stored in the
+			// group file is only a fallback for a chat with no timestamped message.
+			if ts, ok := character.ChatFileSendDate(chatPath); ok && ts > dateLastChat {
+				dateLastChat = ts
+			}
+		}
+		if dateLastChat == 0 {
+			dateLastChat = gd.DateLastChat
 		}
 		gd.DateLastChat = dateLastChat
 		gd.ChatSize = chatSize
