@@ -70,6 +70,18 @@ Cause: seccomp prevented call to disallowed x86_64 system call 6
   Server logs are teed into a 256 KiB ring buffer via `gotavern.Logs()`
   (`ringWriter` chains to the original `log.Writer()` so gomobile's logcat
   forwarding still works).
+- **`android:launchMode="singleTask"` is load-bearing.** Under the default `standard`,
+  every tap on the launcher icon created ANOTHER MainActivity instead of resuming the
+  existing one — 5 stacked instances, each with its own WebView — so returning to the
+  app reloaded the whole page and discarded in-flight streams and JS state. Nothing was
+  destroying them: no `onDestroy` in 9 h of logs, `always_finish_activities=null`, no
+  `onRenderProcessGone`. Diagnose with `dumpsys activity activities | grep "Task{.*<pkg>"`
+  (`sz=` must stay 1) and check that `Logging initialized` / `Server ready on port` do not
+  repeat — both only run from `onCreate`. `onNewIntent` logs, which proves the instance
+  was reused. The wake lock / foreground service keeps the PROCESS (and the Go server)
+  alive; it has no bearing on whether the ACTIVITY is reused.
+- A dead WebView (`onRenderProcessGone`) is never reusable, and rebuilding it while the
+  activity is hidden reloads the page off-screen; recovery is deferred to `onStart`.
 
 ## Background Generation — ROOT CAUSE & LOG CONVENTIONS (2026-09-15)
 
