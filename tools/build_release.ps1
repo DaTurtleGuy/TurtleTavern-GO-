@@ -3,6 +3,7 @@
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $dist = Join-Path $root "dist"
+New-Item -ItemType Directory -Force -Path $dist | Out-Null
 $stageRoot = Join-Path $env:TEMP "opencode\tt-release"
 $ndk = "C:\Users\Julian\AppData\Local\Android\Sdk\ndk\30.0.15729638\toolchains\llvm\prebuilt\windows-x86_64\bin"
 
