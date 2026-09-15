@@ -19,11 +19,12 @@ import (
 )
 
 type CharacterHandler struct {
-	Index *character.Index
+	Index     *character.Index
+	recompute *recomputeProgress
 }
 
 func NewCharacterHandler(idx *character.Index) *CharacterHandler {
-	return &CharacterHandler{Index: idx}
+	return &CharacterHandler{Index: idx, recompute: &recomputeProgress{}}
 }
 
 func (h *CharacterHandler) RegisterRoutes(r chi.Router) {
@@ -42,6 +43,8 @@ func (h *CharacterHandler) RegisterRoutes(r chi.Router) {
 		r.Post("/get", h.Get)
 		r.Post("/chats", h.Chats)
 		r.Post("/rebuild-index", h.RebuildIndex)
+		r.Post("/recompute-recent", h.RecomputeRecent)
+		r.Get("/recompute-recent/status", h.RecomputeStatus)
 	})
 }
 

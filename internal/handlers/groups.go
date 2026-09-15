@@ -36,13 +36,8 @@ func (h *GroupHandler) All(w http.ResponseWriter, r *http.Request) {
 	}
 	os.MkdirAll(uc.Directories.Groups, 0o755)
 
-	type groupResult struct {
-		models.GroupData
-		DateLastChat float64 `json:"date_last_chat"`
-		ChatSize     int64   `json:"chat_size"`
-	}
-	var groups []groupResult
-	groups = []groupResult{}
+	var groups []models.GroupData
+	groups = []models.GroupData{}
 
 	chatEntries, _ := os.ReadDir(uc.Directories.GroupChats)
 	chatNames := make(map[string]bool)
@@ -55,7 +50,7 @@ func (h *GroupHandler) All(w http.ResponseWriter, r *http.Request) {
 	files, err := os.ReadDir(uc.Directories.Groups)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]groupResult{})
+		json.NewEncoder(w).Encode([]models.GroupData{})
 		return
 	}
 
@@ -86,15 +81,11 @@ func (h *GroupHandler) All(w http.ResponseWriter, r *http.Request) {
 			chatInfo, err := os.Stat(chatPath)
 			if err == nil {
 				chatSize += chatInfo.Size()
-				mtime := float64(chatInfo.ModTime().UnixMilli())
-				if mtime > dateLastChat {
-					dateLastChat = mtime
-				}
 			}
 		}
 		gd.DateLastChat = dateLastChat
 		gd.ChatSize = chatSize
-		groups = append(groups, groupResult{GroupData: gd})
+		groups = append(groups, gd)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(groups)

@@ -12147,23 +12147,126 @@ jQuery(async function () {
         if ($btn.hasClass('disabled')) return;
 
         $btn.addClass('disabled');
+
+        const overlay = document.createElement('div');
+        overlay.id = 'recomputeModal';
+        overlay.style.cssText = 'position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);';
+
+        const panel = document.createElement('div');
+        panel.className = 'flex-container flexFlowColumn flexGap10';
+        panel.style.cssText = 'background:var(--SmartThemeBlurTintColor,#1e1e1e);padding:20px;border-radius:10px;width:min(90vw,480px);';
+        panel.innerHTML = '<h3 id="recomputePhase">Starting…</h3>'
+            + '<progress id="recomputeBar" max="100" value="0" style="width:100%;"></progress>'
+            + '<small id="recomputeStatus"></small>';
+
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+
+        const phaseEl = document.getElementById('recomputePhase');
+        const barEl = document.getElementById('recomputeBar');
+        const statusEl = document.getElementById('recomputeStatus');
+
+        const PHASE_LABELS = {
+            characters: 'Recomputing characters…',
+            groups: 'Recomputing groups…',
+            idle: 'Finalizing…',
+        };
+
+        const onKeydown = (e) => { if (e.key === 'Escape') e.stopPropagation(); };
+        document.addEventListener('keydown', onKeydown, true);
+
+        let pollTimer = null;
+        let lastProgress = '';
+        let staleTicks = 0;
+        const MAX_STALE_TICKS = 150; // ~60 s at 400 ms per tick
+
+        function cleanup() {
+            document.removeEventListener('keydown', onKeydown, true);
+            if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+            overlay.remove();
+            $btn.removeClass('disabled');
+        }
+
+        function updateBar(done, total) {
+            if (total > 0) {
+                const pct = Math.min(100, Math.round((done / total) * 100));
+                barEl.value = pct;
+                statusEl.textContent = `${done} / ${total} (${pct}%)`;
+            } else {
+                barEl.value = 0;
+                statusEl.textContent = done > 0 ? `${done} processed` : 'Starting…';
+            }
+        }
+
+        async function poll() {
+            try {
+                const resp = await fetch('/api/characters/recompute-recent/status', {
+                    headers: getRequestHeaders({ omitContentType: true }),
+                });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const s = await resp.json();
+
+                phaseEl.textContent = PHASE_LABELS[s.phase] || s.phase || 'Working…';
+                updateBar(s.done || 0, s.total || 0);
+
+                const progressKey = `${s.phase}:${s.done}:${s.total}`;
+                if (progressKey === lastProgress) {
+                    staleTicks++;
+                } else {
+                    staleTicks = 0;
+                    lastProgress = progressKey;
+                }
+
+                if (staleTicks >= MAX_STALE_TICKS) {
+                    cleanup();
+                    toastr.error('Recompute timed out — the job may still be running on the server.', 'Recompute Timed Out');
+                    return;
+                }
+
+                if (s.running) {
+                    pollTimer = setTimeout(poll, 400);
+                    return;
+                }
+
+                if (s.error) {
+                    cleanup();
+                    toastr.error(s.error, 'Recompute Failed');
+                    return;
+                }
+
+                phaseEl.textContent = 'Refreshing…';
+                statusEl.textContent = 'Reloading character and group lists…';
+                barEl.value = 100;
+
+                await getCharacters();
+                await getGroups();
+
+                cleanup();
+                toastr.success('Character index recomputed.', 'Recompute Complete');
+            } catch (err) {
+                console.error('Recompute poll error:', err);
+                cleanup();
+                toastr.error(err.message || 'Network error during recompute.', 'Recompute Failed');
+            }
+        }
+
         try {
-            const result = await fetch('/api/characters/rebuild-index', {
+            const resp = await fetch('/api/characters/recompute-recent', {
                 method: 'POST',
                 headers: getRequestHeaders(),
             });
-            const data = await result.json();
-            if (data.success) {
-                toastr.success(`Rebuilt index for ${data.count} characters`, 'Character Index');
-                await getCharacters();
-            } else {
-                toastr.error(data.error || 'Unknown error', 'Character Index');
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+
+            if (!data.started) {
+                phaseEl.textContent = 'Attaching to running job…';
             }
+
+            poll();
         } catch (err) {
-            console.error('Failed to rebuild character index:', err);
-            toastr.error('Failed to rebuild character index', 'Character Index');
-        } finally {
-            $btn.removeClass('disabled');
+            console.error('Failed to start recompute:', err);
+            cleanup();
+            toastr.error(err.message || 'Failed to start recompute.', 'Recompute Failed');
         }
     });
 

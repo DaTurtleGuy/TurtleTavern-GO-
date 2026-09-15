@@ -183,15 +183,33 @@ func (idx *Index) upsertCharacter(userFolder string, char models.ShallowCharacte
 		createDate = 0.0
 	}
 
+	// Import/edit/rename callers only know avatar+name, so an upsert must not
+	// wipe the recency already recorded for that character.
+	dateLastChat := char.DateLastChat
+	if dateLastChat == 0 {
+		var existing float64
+		_ = idx.db.QueryRow("SELECT date_last_chat FROM characters WHERE user_folder=? AND avatar=?",
+			userFolder, char.Avatar).Scan(&existing)
+		dateLastChat = existing
+	}
+
 	idx.db.Exec(`INSERT OR REPLACE INTO characters
 		(user_folder, avatar, name, fav, date_added, create_date, date_last_chat,
 		chat_size, data_size, tags, chat, creator, creator_notes, character_version, mtime)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		userFolder, char.Avatar, char.Name, boolToInt(char.Fav),
-		char.DateAdded, createDate, char.DateLastChat,
+		char.DateAdded, createDate, dateLastChat,
 		char.ChatSize, char.DataSize, string(tagsJSON),
 		char.Chat, creator, creatorNotes, charVer, mtime,
 	)
+}
+
+// UpdateDateLastChat records when a character was last used without disturbing
+// the rest of its cached row.
+func (idx *Index) UpdateDateLastChat(userFolder, avatar string, ts float64) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	idx.db.Exec("UPDATE characters SET date_last_chat=? WHERE user_folder=? AND avatar=?", ts, userFolder, avatar)
 }
 
 func (idx *Index) DeleteCharacter(userFolder, avatar string) {

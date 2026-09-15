@@ -73,7 +73,7 @@ func ProcessCharacter(item string, dirs models.UserDirectories, shallow bool) (*
 	result["date_added"] = dateAdded
 
 	chatsDir := filepath.Join(dirs.Chats, fileNameWithoutExt)
-	chatSize, dateLastChat := CalculateChatSize(chatsDir)
+	chatSize, dateLastChat := ChatStats(chatsDir)
 
 	result["chat_size"] = chatSize
 	result["date_last_chat"] = dateLastChat
@@ -136,38 +136,13 @@ func ProcessCharacterFull(item string, dirs models.UserDirectories) (map[string]
 	result["date_added"] = dateAdded
 
 	chatsDir := filepath.Join(dirs.Chats, fileNameWithoutExt)
-	chatSize, dateLastChat := CalculateChatSize(chatsDir)
+	chatSize, dateLastChat := ChatStats(chatsDir)
 	result["chat_size"] = chatSize
 	result["date_last_chat"] = dateLastChat
 	result["data_size"] = util.CalculateDataSize(result["data"])
 	result["json_data"] = imgData
 
 	return result, nil
-}
-
-func CalculateChatSize(charDir string) (int64, float64) {
-	var chatSize int64
-	var dateLastChat float64
-
-	entries, err := os.ReadDir(charDir)
-	if err != nil {
-		return 0, 0
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		chatSize += info.Size()
-		mtime := float64(info.ModTime().UnixMilli())
-		if mtime > dateLastChat {
-			dateLastChat = mtime
-		}
-	}
-	return chatSize, dateLastChat
 }
 
 func WriteCharacterDataToFile(inputImage []byte, jsonData string, outputFile string, dirs models.UserDirectories) error {
