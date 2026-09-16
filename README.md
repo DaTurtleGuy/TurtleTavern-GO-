@@ -51,28 +51,50 @@ extensions live under `data/<handle>/`.
 
 ## Benchmarks (grain of salt included)
 
-I pointed all three servers at the same generated library and measured boot,
-memory, list latency, per-card latency, and concurrency, one server at a time:
-upstream SillyTavern 1.19, TurtleTavern (Node), and this one. The library is 5,000
-generated cards (~2 MB each, mostly a 150-entry lorebook) plus a ~20 MB monster
-every 50th card, tested at 100 / 1,000 / 5,000 cards.
+I pointed all three servers at the same generated character library and measured boot,
+memory, list latency, per-character latency, and concurrency, one server at a time:
+upstream SillyTavern 1.19, TurtleTavern (Node), and this one. The character library is 5,000
+generated characters (~2 MB each, mostly a 150-entry lorebook) plus a ~20 MB monster
+every 50th character, tested at 100 / 1,000 / 5,000 characters.
 
 Fair warning: the harness was vibe-coded in an afternoon, one run per cell,
-synthetic cards, and upstream is 1.19 while TurtleTavern (Node) is 1.17-based, so some of
+synthetic characters, and upstream is 1.19 while TurtleTavern (Node) is 1.17-based, so some of
 the TurtleTavern (Node)-vs-upstream gap is version drift. Don't quote these numbers at anyone.
 The shapes are real, though:
 
-| | 100 cards | 1,000 cards | 5,000 cards |
-|---|---|---|---|
-| Boot (first → warm avg) | ST 13.7→3.6s, fork 11.5→3.1s, **Go 0.6→0.6s** | same shape | same shape |
-| Cold list | ST 13.8s, fork 12.4s, **Go 2.0s** | ST 💥 500, fork 124s, **Go 25.5s** | ST 💥 dead, fork 647s, **Go 145s** |
-| Warm list | ST 1.78s, fork 0.026s, **Go 0.016s** | ST 💥, fork 0.079s, **Go 0.045s** | ST 💥, fork 0.317s, **Go 0.157s** |
-| Peak RSS | ST ~3–4GB, fork 1.5GB, **Go 0.2GB** | ST 4.4GB, fork 1.9GB, **Go 0.3GB** | ST 💥, fork 1.9GB, **Go 0.3GB** |
-| Per-card fetch | ~30ms on all three — it's the 1.5MB payload, not the parser | | |
+"Cold list" is the first list request against a fresh character library — the server has
+to read and parse every character to build its index, so this is the price of
+opening a big character library for the first time. "Warm list" is every request after
+that, served straight from the built index. Same split for boot: first boot
+vs. the average of five restarts on the same data.
 
-The 💥 is the interesting part: upstream serialises every card's full JSON into
-the list response, so around ~1,000 cards `JSON.stringify` exceeds V8's ~512MB
-string ceiling (`RangeError`, HTTP 500 at `characters.js:1472`); at 5,000 cards
-the process dies with a heap OOM. TurtleTavern (Node) dodges it with the SQLite shallow
-index. Go does the same thing, about 4–5x faster to build and ~6x leaner to
-hold.
+| 100 characters | Upstream 1.19 | TurtleTavern (Node) | Go |
+|---|---|---|---|
+| Boot (first → warm avg) | 13.7s → 3.6s | 11.5s → 3.1s | **0.6s → 0.6s** |
+| Cold list | 13.8s | 12.4s | **2.0s** |
+| Warm list | 1.78s | 0.026s | **0.016s** |
+| Peak RSS | ~3–4GB | 1.5GB | **0.2GB** |
+
+| 1,000 characters | Upstream 1.19 | TurtleTavern (Node) | Go |
+|---|---|---|---|
+| Boot (first → warm avg) | 14.7s → 4.1s | 12.0s → 3.2s | **0.6s → 0.6s** |
+| Cold list | HTTP 500 after 111s | 124s | **25.5s** |
+| Warm list | HTTP 500, always | 0.079s | **0.045s** |
+| Peak RSS | 4.4GB | 1.9GB | **0.3GB** |
+
+| 5,000 characters | Upstream 1.19 | TurtleTavern (Node) | Go |
+|---|---|---|---|
+| Boot (first → warm avg) | — (see below) | 16.2s → 3.6s | **0.6s → 0.6s** |
+| Cold list | process died | 647s | **145s** |
+| Warm list | process died | 0.317s | **0.157s** |
+| Peak RSS | process died | 1.9GB | **0.3GB** |
+
+Per-character fetch is ~30ms on all three at every tier — it's the 1.5MB payload,
+not the parser.
+
+The upstream failures are the interesting part: it serialises every character's full
+JSON into the list response, so around ~1,000 characters `JSON.stringify` exceeds
+V8's ~512MB string ceiling (`RangeError`, HTTP 500 at `characters.js:1472`);
+at 5,000 characters the process dies with a heap OOM before it even gets there.
+TurtleTavern (Node) dodges it with the SQLite shallow index. Go does the same
+thing, about 4–5x faster to build and ~6x leaner to hold.
