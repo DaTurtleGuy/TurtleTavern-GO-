@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/TurtleTavern/turtletavern/internal/config"
@@ -33,7 +34,14 @@ func (h *ProxyHandler) RegisterRoutes(r chi.Router) {
 }
 
 func (h *ProxyHandler) Proxy(w http.ResponseWriter, r *http.Request) {
-	target := chi.URLParam(r, "*")
+	// Chi matches on the escaped path, so the wildcard still holds the
+	// frontend's percent-encoded URL (Express decodes route params, which is
+	// why upstream never noticed). Decode before using it as a URL.
+	target, err := url.PathUnescape(chi.URLParam(r, "*"))
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"

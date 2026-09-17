@@ -398,10 +398,11 @@ func (h *ChatHandler) Export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		File      string `json:"file"`
-		AvatarURL string `json:"avatar_url"`
-		IsGroup   bool   `json:"is_group"`
-		Format    string `json:"format"`
+		File           string `json:"file"`
+		AvatarURL      string `json:"avatar_url"`
+		IsGroup        bool   `json:"is_group"`
+		Format         string `json:"format"`
+		ExportFilename string `json:"exportfilename"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.File == "" {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -433,7 +434,7 @@ func (h *ChatHandler) Export(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": string(data)})
+		json.NewEncoder(w).Encode(map[string]string{"result": string(data), "message": "Chat saved to " + body.ExportFilename})
 		return
 	}
 	data, err := os.ReadFile(filename)
@@ -467,7 +468,7 @@ func (h *ChatHandler) Export(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"result": buffer.String()})
+	json.NewEncoder(w).Encode(map[string]string{"result": buffer.String(), "message": "Chat saved to " + body.ExportFilename})
 }
 
 func (h *ChatHandler) Import(w http.ResponseWriter, r *http.Request) {
