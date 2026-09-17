@@ -19,17 +19,19 @@ knowledge base — when something breaks, check there first.
 ## Layout
 
 - `internal/`  — server internals (router/handlers, character index, LLM proxy…)
+- `gotavern/`   — gomobile entry point for the Android app (loopback-only)
 - `public/`    — the web frontend (unmodified at runtime)
 - `default/`   — default settings seed
 - `tools/`     — packaging helpers (mobile asset packing)
-- `verify/`    — Python regression suites
+- `verify/`    — Python regression suites (endpoints, backup/restore round-trips)
 - `config.yaml` — server settings
 
 ## Building
 
 ```bash
-# Windows x64 (pure Go)
-go build -ldflags "-s -w" -o gotavern.exe ./cmd/server
+# Windows x64 (pure Go, CGO off — the local gcc emits a binary Windows
+# refuses to run)
+CGO_ENABLED=0 go build -ldflags "-s -w" -o gotavern.exe ./cmd/server
 
 # Termux / Android arm64 — CGO is REQUIRED (DNS + TLS resolution on Android)
 CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
@@ -40,7 +42,25 @@ CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
 ## Android app
 
 The mobile app wraps this server in-process (gomobile AAR) — see the
-TurtleTavern Android repo for the app shell and releases.
+[TurtleTavern Android repo](https://github.com/DaTurtleGuy/TurtleTavern-Mobile)
+for the app shell and releases. Since app 0.1.5 the app version moves
+independently: the backend number only bumps on Go changes.
+
+## Behavior worth knowing
+
+- Backup/restore is wire-compatible with the Node fork in both directions
+  (export streams a zip; restore validates manifest, hashes and zip-slip,
+  then swaps atomically behind a 503 maintenance gate).
+- Chat dates: `send_date` accepts old string formats and epoch flavors; file
+  mtime is never used for recency; listings never write files (repairs happen
+  only via the recompute action). Group files decode leniently (numeric ids
+  and the like kept real libraries loading).
+- A 502 from the LLM proxy carries the provider's error body; `499` means the
+  frontend aborted the request, not a server failure.
+- Static frontend assets serve `Cache-Control: no-cache`; server read/write
+  timeouts are `0` so multi-GB restores aren't cut mid-stream.
+- SQLite driver splits by build tag: `mattn/go-sqlite3` on android (CGO),
+  `modernc.org/sqlite` on desktop (pure Go).
 
 ## Migrating from the Node version
 
