@@ -88,21 +88,21 @@ opening a big character library for the first time. "Warm list" is every request
 that, served straight from the built index. Same split for boot: first boot
 vs. the average of five restarts on the same data.
 
-| 100 characters | Upstream 1.19 | TurtleTavern (Node) | Go |
+| 100 characters | SillyTavern 1.19 | TurtleTavern (Node) | TurtleTavern (GO) |
 |---|---|---|---|
 | Boot (first → warm avg) | 13.7s → 3.6s | 11.5s → 3.1s | **0.6s → 0.6s** |
 | Cold list | 13.8s | 12.4s | **2.0s** |
 | Warm list | 1.78s | 0.026s | **0.016s** |
 | Peak RSS | ~3–4GB | 1.5GB | **0.2GB** |
 
-| 1,000 characters | Upstream 1.19 | TurtleTavern (Node) | Go |
+| 1,000 characters | SillyTavern 1.19 | TurtleTavern (Node) | TurtleTavern (GO) |
 |---|---|---|---|
 | Boot (first → warm avg) | 14.7s → 4.1s | 12.0s → 3.2s | **0.6s → 0.6s** |
 | Cold list | HTTP 500 after 111s | 124s | **25.5s** |
 | Warm list | HTTP 500, always | 0.079s | **0.045s** |
 | Peak RSS | 4.4GB | 1.9GB | **0.3GB** |
 
-| 5,000 characters | Upstream 1.19 | TurtleTavern (Node) | Go |
+| 5,000 characters | SillyTavern 1.19 | TurtleTavern (Node) | TurtleTavern (GO) |
 |---|---|---|---|
 | Boot (first → warm avg) | — (see below) | 16.2s → 3.6s | **0.6s → 0.6s** |
 | Cold list | process died | 647s | **145s** |
