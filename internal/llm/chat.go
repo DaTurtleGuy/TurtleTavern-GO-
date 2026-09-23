@@ -101,6 +101,8 @@ var openaiReasoningEffortModels = []string{
 var openaiFixedReasoningEffort = map[string]string{"gpt-5.3-chat-latest": "medium"}
 var openaiReasoningEffortMap = map[string]string{"min": "minimal"}
 var openaiVerbosityRe = regexp.MustCompile(`^gpt-5`)
+var openRouterClaudeRe = regexp.MustCompile(`^anthropic/claude`)
+var openRouterGeminiRe = regexp.MustCompile(`google/gemini`)
 var nanogptReasoningEffortMap = map[string]string{
 	"min": "none", "low": "minimal", "medium": "low", "high": "medium", "max": "high",
 }
@@ -433,8 +435,8 @@ func (h *ChatHandler) Generate(w http.ResponseWriter, r *http.Request) {
 				},
 			}
 		}
-		isClaudeModel := regexp.MustCompile(`^anthropic/claude`).MatchString(model)
-		isGeminiModel := regexp.MustCompile(`google/gemini`).MatchString(model)
+	isClaudeModel := openRouterClaudeRe.MatchString(model)
+	isGeminiModel := openRouterGeminiRe.MatchString(model)
 		if msgs := bodyMessages(body); msgs != nil {
 			EmbedOpenRouterMedia(msgs, true, true)
 			AddOpenRouterSignatures(msgs, model, h.Cfg.Gemini.ThoughtSignatures)

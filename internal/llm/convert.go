@@ -1451,15 +1451,22 @@ func AddReasoningContentToToolCalls(messages []any) {
 	}
 }
 
+var (
+	openRouterSigGeminiRe = regexp.MustCompile(`google/gemini`)
+	openRouterSigClaudeRe = regexp.MustCompile(`anthropic/claude`)
+	openRouterSigGPTRe    = regexp.MustCompile(`openai/gpt`)
+	openRouterSigGrokRe   = regexp.MustCompile(`x-ai/grok`)
+)
+
 func openRouterSignatureFormat(model string) string {
 	switch {
-	case regexp.MustCompile(`google/gemini`).MatchString(model):
+	case openRouterSigGeminiRe.MatchString(model):
 		return "google-gemini-v1"
-	case regexp.MustCompile(`anthropic/claude`).MatchString(model):
+	case openRouterSigClaudeRe.MatchString(model):
 		return "anthropic-claude-v1"
-	case regexp.MustCompile(`openai/gpt`).MatchString(model):
+	case openRouterSigGPTRe.MatchString(model):
 		return "openai-responses-v1"
-	case regexp.MustCompile(`x-ai/grok`).MatchString(model):
+	case openRouterSigGrokRe.MatchString(model):
 		return "xai-responses-v1"
 	default:
 		return "unknown"

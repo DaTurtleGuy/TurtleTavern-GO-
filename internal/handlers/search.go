@@ -34,6 +34,7 @@ var visitHeaders = map[string]string{
 
 var transcriptRe = regexp.MustCompile(`<text start="([^"]*)" dur="([^"]*)">([^<]*)</text>`)
 var htmlEntityRe = regexp.MustCompile(`&(#\d+|#x[0-9a-fA-F]+|[a-zA-Z]+);`)
+var visitCSSRe = regexp.MustCompile(`href="(/client.+\.css)"`)
 
 var htmlEntities = map[string]string{
 	"amp": "&", "lt": "<", "gt": ">", "quot": `"`, "apos": "'",
@@ -297,8 +298,7 @@ func (h *SearchHandler) SearXNG(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	cssRe := regexp.MustCompile(`href="(/client.+\.css)"`)
-	if m := cssRe.FindStringSubmatch(string(mainText)); len(m) == 2 {
+	if m := visitCSSRe.FindStringSubmatch(string(mainText)); len(m) == 2 {
 		cssReq, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, strings.TrimSuffix(baseURL, "/")+m[1], nil)
 		if cssReq != nil {
 			for k, v := range visitHeaders {

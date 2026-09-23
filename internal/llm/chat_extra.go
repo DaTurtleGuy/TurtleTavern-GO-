@@ -19,6 +19,14 @@ import (
 	"time"
 )
 
+var (
+	claudeThinkingRe        = regexp.MustCompile(`^claude-(3-7|opus-4|sonnet-4|haiku-4-5|opus-4-5|opus-4-6|sonnet-4-6)`)
+	claudeWebSearchRe       = regexp.MustCompile(`^claude-(3-5|3-7|opus-4|sonnet-4|haiku-4-5|opus-4-5|opus-4-6|sonnet-4-6)`)
+	claudeLimitedSamplingRe = regexp.MustCompile(`^claude-(opus-4-1|sonnet-4-5|haiku-4-5|opus-4-5|opus-4-6|sonnet-4-6)`)
+	claudeVerbosityRe       = regexp.MustCompile(`^claude-(opus-4-5|opus-4-6|sonnet-4-6)`)
+	claudeNoPrefillRe       = regexp.MustCompile(`^claude-(opus-4-6|sonnet-4-6)`)
+)
+
 func (h *ChatHandler) sendClaude(w http.ResponseWriter, r *http.Request, body map[string]any) {
 	reverseProxy := bodyStr(body, "reverse_proxy")
 	apiURL := APIClaude
@@ -48,12 +56,12 @@ func (h *ChatHandler) sendClaude(w http.ResponseWriter, r *http.Request, body ma
 		msgs = []any{}
 	}
 	converted, systemPrompt := ConvertClaudeMessages(msgs, bodyStr(body, "assistant_prefill"), useSysPrompt, useTools, PromptNamesFromBody(body))
-	useThinking := regexp.MustCompile(`^claude-(3-7|opus-4|sonnet-4|haiku-4-5|opus-4-5|opus-4-6|sonnet-4-6)`).MatchString(model)
-	useWebSearch := regexp.MustCompile(`^claude-(3-5|3-7|opus-4|sonnet-4|haiku-4-5|opus-4-5|opus-4-6|sonnet-4-6)`).MatchString(model) && bodyBool(body, "enable_web_search")
-	isLimitedSampling := regexp.MustCompile(`^claude-(opus-4-1|sonnet-4-5|haiku-4-5|opus-4-5|opus-4-6|sonnet-4-6)`).MatchString(model)
-	useVerbosity := regexp.MustCompile(`^claude-(opus-4-5|opus-4-6|sonnet-4-6)`).MatchString(model)
-	noPrefillModel := regexp.MustCompile(`^claude-(opus-4-6|sonnet-4-6)`).MatchString(model)
-	isAdaptiveModel := h.Cfg.Claude.EnableAdaptiveThinking && regexp.MustCompile(`^claude-(opus-4-6|sonnet-4-6)`).MatchString(model)
+	useThinking := claudeThinkingRe.MatchString(model)
+	useWebSearch := claudeWebSearchRe.MatchString(model) && bodyBool(body, "enable_web_search")
+	isLimitedSampling := claudeLimitedSamplingRe.MatchString(model)
+	useVerbosity := claudeVerbosityRe.MatchString(model)
+	noPrefillModel := claudeNoPrefillRe.MatchString(model)
+	isAdaptiveModel := h.Cfg.Claude.EnableAdaptiveThinking && claudeNoPrefillRe.MatchString(model)
 
 	var stopSequences []any
 	if stop, ok := body["stop"].([]any); ok {
