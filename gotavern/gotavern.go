@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -63,6 +64,14 @@ func Start(appRoot string, port int32) (int32, error) {
 	defer mu.Unlock()
 	if srv != nil {
 		return boundPort, nil
+	}
+
+	// Android app sandboxes have no /tmp and do not always export TMPDIR to
+	// the gomobile process, so os.CreateTemp("") (restore upload spool,
+	// sprite zip spool) fails with ENOENT and restore 400s with
+	// "cannot buffer the upload on the server". Pin TMPDIR to a dir we own.
+	if tmp := filepath.Join(appRoot, "tmp"); os.MkdirAll(tmp, 0o755) == nil {
+		_ = os.Setenv("TMPDIR", tmp)
 	}
 
 	// Tee the std log stream (gomobile already forwards it to logcat)
@@ -146,5 +155,5 @@ func Logs() string {
 
 // Version returns the server version string.
 func Version() string {
-	return "0.0.1 (BETA)"
+	return "0.1.5 (BETA)"
 }
