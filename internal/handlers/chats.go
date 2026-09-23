@@ -951,50 +951,98 @@ func (h *ChatHandler) Recent(w http.ResponseWriter, r *http.Request) {
 	var allChatFiles []chatFile
 
 	charEntries, _ := os.ReadDir(uc.Directories.Characters)
+	type charTarget struct {
+		png string
+		dir string
+	}
+	var charTargets []charTarget
 	for _, e := range charEntries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".png") {
 			continue
 		}
 		charName := strings.TrimSuffix(e.Name(), ".png")
-		chatDir := filepath.Join(uc.Directories.Chats, charName)
-		chatEntries, _ := os.ReadDir(chatDir)
-		for _, ce := range chatEntries {
-			if !ce.IsDir() && strings.HasSuffix(ce.Name(), ".jsonl") {
-				info, err := ce.Info()
-				if err == nil {
-					allChatFiles = append(allChatFiles, chatFile{
-						PNGFile:  e.Name(),
-						FilePath: filepath.Join(chatDir, ce.Name()),
-						Mtime:    info.ModTime().UnixMilli(),
-					})
+		charTargets = append(charTargets, charTarget{
+			png: e.Name(),
+			dir: filepath.Join(uc.Directories.Chats, charName),
+		})
+	}
+	charSlices := make([][]chatFile, len(charTargets))
+	var charWg sync.WaitGroup
+	charSem := make(chan struct{}, 4)
+	for i, t := range charTargets {
+		charWg.Add(1)
+		go func(idx int, tgt charTarget) {
+			defer charWg.Done()
+			charSem <- struct{}{}
+			defer func() { <-charSem }()
+			var out []chatFile
+			chatEntries, _ := os.ReadDir(tgt.dir)
+			for _, ce := range chatEntries {
+				if !ce.IsDir() && strings.HasSuffix(ce.Name(), ".jsonl") {
+					info, err := ce.Info()
+					if err == nil {
+						out = append(out, chatFile{
+							PNGFile:  tgt.png,
+							FilePath: filepath.Join(tgt.dir, ce.Name()),
+							Mtime:    info.ModTime().UnixMilli(),
+						})
+					}
 				}
 			}
-		}
+			charSlices[idx] = out
+		}(i, t)
+	}
+	charWg.Wait()
+	for _, s := range charSlices {
+		allChatFiles = append(allChatFiles, s...)
 	}
 
 	groupEntries, _ := os.ReadDir(uc.Directories.Groups)
+	type groupTarget struct {
+		name string
+	}
+	var groupTargets []groupTarget
 	for _, ge := range groupEntries {
 		if ge.IsDir() || !strings.HasSuffix(ge.Name(), ".json") {
 			continue
 		}
-		var gd models.GroupData
-		if err := util.ReadJSONFile(filepath.Join(uc.Directories.Groups, ge.Name()), &gd); err != nil {
-			continue
-		}
-		for _, chatID := range gd.Chats {
-			chatFile2 := filepath.Join(uc.Directories.GroupChats, chatID+".jsonl")
-			if !util.FileExists(chatFile2) {
-				continue
+		groupTargets = append(groupTargets, groupTarget{name: ge.Name()})
+	}
+	groupSlices := make([][]chatFile, len(groupTargets))
+	var groupWg sync.WaitGroup
+	groupSem := make(chan struct{}, 4)
+	for i, t := range groupTargets {
+		groupWg.Add(1)
+		go func(idx int, tgt groupTarget) {
+			defer groupWg.Done()
+			groupSem <- struct{}{}
+			defer func() { <-groupSem }()
+			var out []chatFile
+			var gd models.GroupData
+			if err := util.ReadJSONFile(filepath.Join(uc.Directories.Groups, tgt.name), &gd); err != nil {
+				groupSlices[idx] = out
+				return
 			}
-			info, err := os.Stat(chatFile2)
-			if err == nil {
-				allChatFiles = append(allChatFiles, chatFile{
-					GroupID:  gd.ID,
-					FilePath: chatFile2,
-					Mtime:    info.ModTime().UnixMilli(),
-				})
+			for _, chatID := range gd.Chats {
+				chatFile2 := filepath.Join(uc.Directories.GroupChats, chatID+".jsonl")
+				if !util.FileExists(chatFile2) {
+					continue
+				}
+				info, err := os.Stat(chatFile2)
+				if err == nil {
+					out = append(out, chatFile{
+						GroupID:  gd.ID,
+						FilePath: chatFile2,
+						Mtime:    info.ModTime().UnixMilli(),
+					})
+				}
 			}
-		}
+			groupSlices[idx] = out
+		}(i, t)
+	}
+	groupWg.Wait()
+	for _, s := range groupSlices {
+		allChatFiles = append(allChatFiles, s...)
 	}
 
 	if rootEntries, err := os.ReadDir(uc.Directories.Chats); err == nil {

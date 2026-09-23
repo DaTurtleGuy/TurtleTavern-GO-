@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/TurtleTavern/turtletavern/internal/character"
@@ -55,43 +56,69 @@ func (h *GroupHandler) All(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Per-group reads are independent (distinct files, read-only shared
+	// chatNames), so they run concurrently with a small semaphore cap.
+	// Results land in indexed slots to preserve the serial listing order.
+	var groupNames []string
 	for _, f := range files {
 		if f.IsDir() || !strings.HasSuffix(f.Name(), ".json") {
 			continue
 		}
-		var gd models.GroupData
-		filePath := filepath.Join(uc.Directories.Groups, f.Name())
-		if err := util.ReadJSONFile(filePath, &gd); err != nil {
-			continue
-		}
+		groupNames = append(groupNames, f.Name())
+	}
+	type groupResult struct {
+		gd models.GroupData
+		ok bool
+	}
+	results := make([]groupResult, len(groupNames))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 4)
+	for i, name := range groupNames {
+		wg.Add(1)
+		go func(idx int, fileName string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			var gd models.GroupData
+			filePath := filepath.Join(uc.Directories.Groups, fileName)
+			if err := util.ReadJSONFile(filePath, &gd); err != nil {
+				return
+			}
 
-		// Creation dates are repaired by the recompute action, never here: this used
-		// to backfill date_added from the group file's mtime, so every listing after
-		// a restore stamped old groups with the copy time.
-		var chatSize int64
-		var dateLastChat float64
-		for _, chatID := range gd.Chats {
-			if !chatNames[chatID] {
-				continue
+			// Creation dates are repaired by the recompute action, never here: this used
+			// to backfill date_added from the group file's mtime, so every listing after
+			// a restore stamped old groups with the copy time.
+			var chatSize int64
+			var dateLastChat float64
+			for _, chatID := range gd.Chats {
+				if !chatNames[chatID] {
+					continue
+				}
+				chatPath := filepath.Join(uc.Directories.GroupChats, chatID+".jsonl")
+				chatInfo, err := os.Stat(chatPath)
+				if err != nil {
+					continue
+				}
+				chatSize += chatInfo.Size()
+				// The last message in the chats is the truth. The value stored in the
+				// group file is only a fallback for a chat with no timestamped message.
+				if ts, ok := character.ChatFileSendDate(chatPath); ok && ts > dateLastChat {
+					dateLastChat = ts
+				}
 			}
-			chatPath := filepath.Join(uc.Directories.GroupChats, chatID+".jsonl")
-			chatInfo, err := os.Stat(chatPath)
-			if err != nil {
-				continue
+			if dateLastChat == 0 {
+				dateLastChat = gd.DateLastChat
 			}
-			chatSize += chatInfo.Size()
-			// The last message in the chats is the truth. The value stored in the
-			// group file is only a fallback for a chat with no timestamped message.
-			if ts, ok := character.ChatFileSendDate(chatPath); ok && ts > dateLastChat {
-				dateLastChat = ts
-			}
+			gd.DateLastChat = dateLastChat
+			gd.ChatSize = chatSize
+			results[idx] = groupResult{gd: gd, ok: true}
+		}(i, name)
+	}
+	wg.Wait()
+	for _, r := range results {
+		if r.ok {
+			groups = append(groups, r.gd)
 		}
-		if dateLastChat == 0 {
-			dateLastChat = gd.DateLastChat
-		}
-		gd.DateLastChat = dateLastChat
-		gd.ChatSize = chatSize
-		groups = append(groups, gd)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(groups)

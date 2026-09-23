@@ -260,11 +260,40 @@ func (h *SettingsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	root := uc.Directories.Root
 	sub := func(name string) string { return filepath.Join(root, name) }
-	novelaiSettings, novelaiNames := readPresetDir(sub("NovelAI Settings"), true)
-	openaiSettings, openaiNames := readPresetDir(sub("OpenAI Settings"), true)
-	textgenPresets, textgenNames := readPresetDir(sub("TextGen Settings"), true)
-	koboldSettings, koboldNames := readPresetDir(sub("KoboldAI Settings"), true)
-	worldNames := worldFileNames(sub("worlds"))
+	var (
+		novelaiSettings, novelaiNames []string
+		openaiSettings, openaiNames   []string
+		textgenPresets, textgenNames  []string
+		koboldSettings, koboldNames   []string
+		worldNames                    []string
+		themes, movingUIPresets       []any
+		quickReplyPresets             []any
+		instruct, context             []any
+		sysprompt, reasoning          []any
+	)
+	presetJobs := []func(){
+		func() { novelaiSettings, novelaiNames = readPresetDir(sub("NovelAI Settings"), true) },
+		func() { openaiSettings, openaiNames = readPresetDir(sub("OpenAI Settings"), true) },
+		func() { textgenPresets, textgenNames = readPresetDir(sub("TextGen Settings"), true) },
+		func() { koboldSettings, koboldNames = readPresetDir(sub("KoboldAI Settings"), true) },
+		func() { worldNames = worldFileNames(sub("worlds")) },
+		func() { themes = readJSONFiles(sub("themes")) },
+		func() { movingUIPresets = readJSONFiles(sub("movingUI")) },
+		func() { quickReplyPresets = readJSONFiles(sub("QuickReplies")) },
+		func() { instruct = readJSONFiles(sub("instruct")) },
+		func() { context = readJSONFiles(sub("context")) },
+		func() { sysprompt = readJSONFiles(sub("sysprompt")) },
+		func() { reasoning = readJSONFiles(sub("reasoning")) },
+	}
+	var presetsWg sync.WaitGroup
+	for _, job := range presetJobs {
+		presetsWg.Add(1)
+		go func(j func()) {
+			defer presetsWg.Done()
+			j()
+		}(job)
+	}
+	presetsWg.Wait()
 	resp := map[string]any{
 		"settings":                         string(settings),
 		"koboldai_settings":                koboldSettings,
@@ -276,13 +305,13 @@ func (h *SettingsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		"openai_setting_names":             openaiNames,
 		"textgenerationwebui_presets":      textgenPresets,
 		"textgenerationwebui_preset_names": textgenNames,
-		"themes":                           readJSONFiles(sub("themes")),
-		"movingUIPresets":                  readJSONFiles(sub("movingUI")),
-		"quickReplyPresets":                readJSONFiles(sub("QuickReplies")),
-		"instruct":                         readJSONFiles(sub("instruct")),
-		"context":                          readJSONFiles(sub("context")),
-		"sysprompt":                        readJSONFiles(sub("sysprompt")),
-		"reasoning":                        readJSONFiles(sub("reasoning")),
+		"themes":                           themes,
+		"movingUIPresets":                  movingUIPresets,
+		"quickReplyPresets":                quickReplyPresets,
+		"instruct":                         instruct,
+		"context":                          context,
+		"sysprompt":                        sysprompt,
+		"reasoning":                        reasoning,
 		"enable_extensions":                h.Cfg.Extensions.Enabled,
 		"enable_extensions_auto_update":    h.Cfg.Extensions.AutoUpdate,
 		"enable_accounts":                  h.Cfg.EnableUserAccounts,

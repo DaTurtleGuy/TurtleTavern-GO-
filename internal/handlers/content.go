@@ -130,28 +130,51 @@ func (h *ContentHandler) WorldList(w http.ResponseWriter, r *http.Request) {
 		Extensions map[string]any `json:"extensions"`
 	}
 	var out []item
+	var worldNames []string
 	for _, e := range entries {
 		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ".json") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(uc.Directories.Worlds, e.Name()))
-		if err != nil {
-			continue
+		worldNames = append(worldNames, e.Name())
+	}
+	type worldResult struct {
+		it item
+		ok bool
+	}
+	worldResults := make([]worldResult, len(worldNames))
+	var worldWg sync.WaitGroup
+	worldSem := make(chan struct{}, 4)
+	for i, name := range worldNames {
+		worldWg.Add(1)
+		go func(idx int, fileName string) {
+			defer worldWg.Done()
+			worldSem <- struct{}{}
+			defer func() { <-worldSem }()
+			data, err := os.ReadFile(filepath.Join(uc.Directories.Worlds, fileName))
+			if err != nil {
+				return
+			}
+			var parsed map[string]any
+			if err := json.Unmarshal(data, &parsed); err != nil {
+				return
+			}
+			base := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+			name, _ := parsed["name"].(string)
+			if name == "" {
+				name = base
+			}
+			exts, _ := parsed["extensions"].(map[string]any)
+			if exts == nil {
+				exts = map[string]any{}
+			}
+			worldResults[idx] = worldResult{it: item{FileID: base, Name: name, Extensions: exts}, ok: true}
+		}(i, name)
+	}
+	worldWg.Wait()
+	for _, r := range worldResults {
+		if r.ok {
+			out = append(out, r.it)
 		}
-		var parsed map[string]any
-		if err := json.Unmarshal(data, &parsed); err != nil {
-			continue
-		}
-		base := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
-		name, _ := parsed["name"].(string)
-		if name == "" {
-			name = base
-		}
-		exts, _ := parsed["extensions"].(map[string]any)
-		if exts == nil {
-			exts = map[string]any{}
-		}
-		out = append(out, item{FileID: base, Name: name, Extensions: exts})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].FileID < out[j].FileID })
 	if out == nil {
