@@ -146,6 +146,7 @@ func (h *CharacterHandler) Edit(w http.ResponseWriter, r *http.Request) {
 	if file, _, err := r.FormFile("avatar"); err == nil {
 		defer file.Close()
 		inputImage, _ := io.ReadAll(file)
+		media.InvalidateThumbnail(uc.Directories.Root, media.ThumbAvatar, avatarURL)
 		character.WriteCharacterDataToFile(inputImage, string(charJSON), targetFile, uc.Directories)
 	} else {
 		avatarPath := filepath.Join(uc.Directories.Characters, avatarURL)
@@ -194,6 +195,7 @@ func (h *CharacterHandler) EditAvatar(w http.ResponseWriter, r *http.Request) {
 	}
 	targetFile := strings.TrimSuffix(avatarURL, ".png")
 	character.WriteCharacterDataToFile(inputImage, data, targetFile, uc.Directories)
+	media.InvalidateThumbnail(uc.Directories.Root, media.ThumbAvatar, avatarURL)
 	w.WriteHeader(http.StatusOK)
 }
 
