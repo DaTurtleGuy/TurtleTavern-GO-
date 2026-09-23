@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 
 	"github.com/TurtleTavern/turtletavern/internal/auth"
 	"github.com/TurtleTavern/turtletavern/internal/config"
@@ -69,6 +70,22 @@ func vectorIndexDir(vectorsRoot, source, collectionID, model string) string {
 
 func vectorIndexFile(vectorsRoot, source, collectionID, model string) string {
 	return filepath.Join(vectorIndexDir(vectorsRoot, source, collectionID, model), "index.json")
+}
+
+var (
+	vectorMuMap   sync.Mutex
+	vectorMuByDir = make(map[string]*sync.Mutex)
+)
+
+func vectorCollectionLock(indexFile string) *sync.Mutex {
+	vectorMuMap.Lock()
+	defer vectorMuMap.Unlock()
+	m, ok := vectorMuByDir[indexFile]
+	if !ok {
+		m = &sync.Mutex{}
+		vectorMuByDir[indexFile] = m
+	}
+	return m
 }
 
 func loadVectorItems(path string) ([]vectorItem, error) {
@@ -427,6 +444,9 @@ func (h *VectorsHandler) Insert(w http.ResponseWriter, r *http.Request) {
 		vectors = append(vectors, batch...)
 	}
 	path := vectorIndexFile(vectorsRoot, source, collectionID, vs.model)
+	collectionMu := vectorCollectionLock(path)
+	collectionMu.Lock()
+	defer collectionMu.Unlock()
 	items, err := loadVectorItems(path)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -501,6 +521,9 @@ func (h *VectorsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	path := vectorIndexFile(vectorsRoot, source, collectionID, vs.model)
+	collectionMu := vectorCollectionLock(path)
+	collectionMu.Lock()
+	defer collectionMu.Unlock()
 	items, err := loadVectorItems(path)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)

@@ -31,7 +31,7 @@ type Session struct {
 	CSRFDisabled bool
 	cfg          *config.Config
 	users        *UserStore
-	mu           sync.Mutex
+	mu           sync.RWMutex
 	sessions     map[string]*sessionData
 	loginLimiter *RateLimiter
 	recoverLimit *RateLimiter
@@ -120,16 +120,24 @@ func (s *Session) sessionFromRequest(r *http.Request) *sessionData {
 	if err != nil || c.Value == "" {
 		return nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
 	sess, ok := s.sessions[c.Value]
 	if !ok {
+		s.mu.RUnlock()
 		return nil
 	}
 	if s.MaxAge > 0 && time.Since(sess.Created) > s.MaxAge {
-		delete(s.sessions, c.Value)
+		// Expired: upgrade to a write lock and re-check before deleting,
+		// since another goroutine may have removed it already.
+		s.mu.RUnlock()
+		s.mu.Lock()
+		if cur, ok := s.sessions[c.Value]; ok && time.Since(cur.Created) > s.MaxAge {
+			delete(s.sessions, c.Value)
+		}
+		s.mu.Unlock()
 		return nil
 	}
+	s.mu.RUnlock()
 	return sess
 }
 
