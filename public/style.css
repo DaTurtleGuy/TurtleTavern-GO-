@@ -882,7 +882,56 @@ body .panelControlBar {
 
 /* special case for desktop Safari to allow #sheld resizing */
 @media only screen and (min-width: 1024px) and (-webkit-min-device-pixel-ratio: 2) and (pointer: fine) {
-    #form_sheld {
+#chat_search_bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    backdrop-filter: blur(var(--SmartThemeBlurStrength));
+    background-color: var(--SmartThemeBlurTintColor);
+    -webkit-backdrop-filter: blur(var(--SmartThemeBlurStrength));
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+}
+
+#chatSearch {
+    flex: 1;
+    min-width: 0;
+}
+
+#chatSearchCount {
+    white-space: nowrap;
+    font-size: calc(var(--mainFontSize) * 0.85);
+    opacity: 0.8;
+}
+
+#chat_search_bar .menu_button {
+    padding: 4px 8px;
+    cursor: pointer;
+}
+
+#chatSearchLoadAll.chat-search-loading {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+mark.chat-search-match {
+    color: black;
+    background-color: yellow;
+    text-shadow: none !important;
+}
+
+mark.chat-search-current {
+    color: black;
+    background-color: orange;
+    text-shadow: none !important;
+}
+
+#form_sheld {
         margin-bottom: 4px;
     }
 }

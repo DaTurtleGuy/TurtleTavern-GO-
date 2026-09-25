@@ -270,6 +270,7 @@ import { addShowdownPatch } from './scripts/util/showdown-patch.js';
 import { applyBrowserFixes } from './scripts/browser-fixes.js';
 import { initServerHistory } from './scripts/server-history.js';
 import { initSettingsSearch } from './scripts/setting-search.js';
+import { initChatSearch, openChatSearch } from './scripts/chat-search.js';
 import { initBulkEdit } from './scripts/bulk-edit.js';
 import { getContext } from './scripts/st-context.js';
 import { replaceVowels } from './scripts/TurtleAdittions.js';
@@ -774,6 +775,7 @@ async function firstLoadInit() {
     initInputMarkdown();
     initServerHistory();
     initSettingsSearch();
+    initChatSearch();
     initBulkEdit();
     initReasoning();
     initWelcomeScreen();
@@ -11632,6 +11634,8 @@ jQuery(async function () {
                     });
                 }
             }
+        } else if (id == 'option_find_chat') {
+            openChatSearch();
         } else if (id == 'option_start_new_chat') {
             if ((selected_group || this_chid !== undefined) && !is_send_press) {
                 let deleteCurrentChat = false;

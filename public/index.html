@@ -8140,6 +8140,14 @@
     </div>
     <div id="sheld">
         <div id="sheldheader" class="fa-solid fa-grip drag-grabber"></div>
+        <div id="chat_search_bar" class="displayNone">
+            <input id="chatSearch" type="text" placeholder="Find in chat..." autocomplete="off">
+            <span id="chatSearchCount">0/0</span>
+            <div id="chatSearchLoadAll" class="menu_button displayNone" role="button" tabindex="0" title="Load full history so search covers every message"><i class="fa-solid fa-angles-down"></i></div>
+            <div id="chatSearchPrev" class="menu_button" role="button" tabindex="0" title="Previous match"><i class="fa-solid fa-chevron-up"></i></div>
+            <div id="chatSearchNext" class="menu_button" role="button" tabindex="0" title="Next match"><i class="fa-solid fa-chevron-down"></i></div>
+            <div id="chatSearchClose" class="menu_button" role="button" tabindex="0" title="Close search"><i class="fa-solid fa-times"></i></div>
+        </div>
         <div id="chat">
         </div>
         <div id="form_sheld">
@@ -8233,6 +8241,10 @@
             <a id="option_select_chat">
                 <i class="fa-lg fa-solid fa-address-book"></i>
                 <span data-i18n="Manage chat files">Manage chat files</span>
+            </a>
+            <a id="option_find_chat">
+                <i class="fa-lg fa-solid fa-magnifying-glass"></i>
+                <span data-i18n="Find in chat">Find in chat</span>
             </a>
             <hr>
             <a id="option_delete_mes">
