@@ -882,6 +882,11 @@ body .panelControlBar {
 
 /* special case for desktop Safari to allow #sheld resizing */
 @media only screen and (min-width: 1024px) and (-webkit-min-device-pixel-ratio: 2) and (pointer: fine) {
+#form_sheld {
+        margin-bottom: 4px;
+    }
+}
+
 #chat_search_bar {
     position: absolute;
     top: 0;
@@ -931,9 +936,102 @@ mark.chat-search-current {
     text-shadow: none !important;
 }
 
-#form_sheld {
-        margin-bottom: 4px;
-    }
+#field_search_bar {
+    position: fixed;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    backdrop-filter: blur(var(--SmartThemeBlurStrength));
+    background-color: var(--SmartThemeBlurTintColor);
+    -webkit-backdrop-filter: blur(var(--SmartThemeBlurStrength));
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 8px;
+    max-width: min(560px, 92vw);
+}
+
+#field_search_bar.fs-in-popup {
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: 92%;
+}
+
+#fieldSearch {
+    flex: 1 1 60px;
+    min-width: 60px;
+}
+
+#fieldSearch,
+#chatSearch {
+    background-color: rgba(0, 0, 0, 0.35);
+    color: var(--SmartThemeBodyColor, #e6e6e6);
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.25));
+    border-radius: 4px;
+    padding: 4px 6px;
+    outline: none;
+    text-shadow: none;
+}
+
+#fieldSearch::placeholder,
+#chatSearch::placeholder {
+    color: var(--SmartThemeBodyColor, #e6e6e6);
+    opacity: 0.55;
+}
+
+#fieldSearchScope {
+    white-space: nowrap;
+    font-size: calc(var(--mainFontSize) * 0.8);
+    opacity: 0.75;
+}
+
+#fieldSearchCount {
+    white-space: nowrap;
+    font-size: calc(var(--mainFontSize) * 0.85);
+    opacity: 0.8;
+}
+
+#field_search_bar .menu_button {
+    padding: 4px 8px;
+    cursor: pointer;
+}
+
+.fs-backdrop {
+    position: fixed;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.fs-content {
+    position: absolute;
+    top: 0;
+    left: 0;
+    color: transparent;
+}
+
+.fs-content mark.fs-match {
+    color: transparent;
+    background-color: yellow;
+    text-shadow: none !important;
+    padding: 0;
+}
+
+.fs-content mark.fs-current {
+    color: transparent;
+    background-color: orange;
+}
+
+textarea.fs-active {
+    position: relative;
+    z-index: 1;
+    background-color: transparent !important;
+    text-shadow: none !important;
 }
 
 #send_form {

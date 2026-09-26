@@ -271,6 +271,7 @@ import { applyBrowserFixes } from './scripts/browser-fixes.js';
 import { initServerHistory } from './scripts/server-history.js';
 import { initSettingsSearch } from './scripts/setting-search.js';
 import { initChatSearch, openChatSearch } from './scripts/chat-search.js';
+import { initFieldSearch } from './scripts/field-search.js';
 import { initBulkEdit } from './scripts/bulk-edit.js';
 import { getContext } from './scripts/st-context.js';
 import { replaceVowels } from './scripts/TurtleAdittions.js';
@@ -776,6 +777,7 @@ async function firstLoadInit() {
     initServerHistory();
     initSettingsSearch();
     initChatSearch();
+    initFieldSearch();
     initBulkEdit();
     initReasoning();
     initWelcomeScreen();
@@ -9599,7 +9601,7 @@ function openAlternateGreetings() {
         }
     }
 
-    const template = $('#alternate_greetings_template .alternate_grettings').clone();
+    const template = $('#alternate_greetings_template .alternate_grettings').first().clone();
     const getArray = () => menu_type == 'create' ? create_save.alternate_greetings : characters[chid].data.alternate_greetings;
     const popup = new Popup(template, POPUP_TYPE.TEXT, '', {
         wide: true,
@@ -9639,7 +9641,7 @@ function openAlternateGreetings() {
  * @param {Popup} popup
  */
 function addAlternateGreeting(template, greeting, index, getArray, popup) {
-    const greetingBlock = $('#alternate_greeting_form_template .alternate_greeting').clone();
+    const greetingBlock = $('#alternate_greeting_form_template .alternate_greeting').first().clone();
     greetingBlock.attr('data-index', index);
     greetingBlock.find('.alternate_greeting_text')
         .attr('id', `alternate_greeting_${index}`)

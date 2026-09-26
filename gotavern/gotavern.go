@@ -155,5 +155,5 @@ func Logs() string {
 
 // Version returns the server version string.
 func Version() string {
-	return "0.1.6A"
+	return "0.1.6B"
 }
