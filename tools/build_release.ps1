@@ -64,7 +64,7 @@ try {
         $stage = New-Stage "linux-$($arch[1])"
         Build-Go "linux" $arch[0] (Join-Path $stage "gotavern")
         Remove-Item (Join-Path $dist "GoTavern-Linux-$($arch[1]).tar.gz") -Force -ErrorAction SilentlyContinue
-        tar -czf (Join-Path $dist "GoTavern-Linux-$($arch[1]).tar.gz") -C $stage .
+        tar -czf (Join-Path $dist "GoTavern-Linux-$($arch[1]).tar.gz") -C $stage gotavern config.yaml README.txt public default
     }
 
     # macOS x64 / arm64
@@ -72,14 +72,14 @@ try {
         $stage = New-Stage "macos-$($arch[1])"
         Build-Go "darwin" $arch[0] (Join-Path $stage "gotavern")
         Remove-Item (Join-Path $dist "GoTavern-macOS-$($arch[1]).tar.gz") -Force -ErrorAction SilentlyContinue
-        tar -czf (Join-Path $dist "GoTavern-macOS-$($arch[1]).tar.gz") -C $stage .
+        tar -czf (Join-Path $dist "GoTavern-macOS-$($arch[1]).tar.gz") -C $stage gotavern config.yaml README.txt public default
     }
 
     # Termux / Android arm64 (CGO required: DNS + TLS via Bionic)
     $stage = New-Stage "termux-arm64"
     Build-Go "android" "arm64" (Join-Path $stage "gotavern") (Join-Path $ndk "aarch64-linux-android21-clang.cmd")
     Remove-Item (Join-Path $dist "GoTavern-Termux-arm64.tar.gz") -Force -ErrorAction SilentlyContinue
-    tar -czf (Join-Path $dist "GoTavern-Termux-arm64.tar.gz") -C $stage .
+    tar -czf (Join-Path $dist "GoTavern-Termux-arm64.tar.gz") -C $stage gotavern config.yaml README.txt public default
 } finally {
     Pop-Location
     Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
