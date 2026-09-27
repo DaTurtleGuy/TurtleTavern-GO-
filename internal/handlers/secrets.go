@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"path/filepath"
 
 	"github.com/TurtleTavern/turtletavern/internal/config"
 	"github.com/TurtleTavern/turtletavern/internal/secrets"
@@ -27,6 +26,7 @@ var secretKeyList = []string{
 	"minimax_group_id", "api_key_moonshot", "api_key_cometapi", "api_key_azure_openai",
 	"api_key_zai", "api_key_siliconflow", "api_key_elevenlabs", "api_key_pollinations",
 	"volcengine_app_id", "volcengine_access_key",
+	"backupper_url", "api_key_backupper",
 }
 
 type SecretsHandler struct {
@@ -38,7 +38,7 @@ func NewSecretsHandler(cfg *config.Config) *SecretsHandler {
 }
 
 func (h *SecretsHandler) manager(root string) *secrets.Manager {
-	m := secrets.NewManager(root, filepath.Join(root, "backups"), h.AllowKeysExposure)
+	m := secrets.UserManager(root, h.AllowKeysExposure)
 	m.MigrateFlatSecrets()
 	return m
 }

@@ -1,0 +1,112 @@
+<div class="flex-container flexFlowColumn flexGap10" style="width:100%;">
+    {{#if configured}}
+    <div class="flex-container alignItemsCenter flexGap10">
+        <small><strong data-i18n="URL:">URL:</strong> <code>{{url}}</code></small>
+        {{#if reachable}}
+        <small class="remoteBackupReachable"><i class="fa-solid fa-circle-check"></i> <span data-i18n="Connected">Connected</span></small>
+        {{else}}
+        <small class="remoteBackupUnreachable"><i class="fa-solid fa-circle-xmark"></i> <span data-i18n="Unreachable">Unreachable</span></small>
+        {{/if}}
+    </div>
+    {{#if lastSyncAt}}
+    <small class="opacity50p"><strong data-i18n="Last sync:">Last sync:</strong> {{lastSyncText}}</small>
+    {{/if}}
+    {{#if lastError}}
+    <div class="remoteBackupError flex-container alignItemsCenter flexGap10">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <small>{{lastError}}</small>
+    </div>
+    {{/if}}
+    <div class="flex-container flexGap10">
+        <label class="checkbox_label" for="remoteSyncIncludeBackups">
+            <input id="remoteSyncIncludeBackups" type="checkbox">
+            <small data-i18n="Include chat backups">Include chat backups</small>
+        </label>
+        <div class="flex-container flexFlowColumn flexNoGap">
+            <label class="checkbox_label" for="remoteSyncIncludeKeys">
+                <input id="remoteSyncIncludeKeys" type="checkbox" {{#unless allowKeysExposure}}disabled{{/unless}}>
+                <small data-i18n="Include API keys">Include API keys</small>
+            </label>
+            {{#unless allowKeysExposure}}
+            <small class="opacity50p" data-i18n="API key export is not allowed by the server.">API key export is not allowed by the server.</small>
+            {{/unless}}
+        </div>
+    </div>
+    <div class="flex-container flexGap10 alignItemsCenter">
+        <div class="remoteBackupSyncButton menu_button menu_button_icon" role="button" tabindex="0">
+            <i class="fa-fw fa-solid fa-sync"></i>
+            <span data-i18n="Sync">Sync</span>
+        </div>
+        <div class="remoteBackupRefreshButton menu_button menu_button_icon" role="button" tabindex="0">
+            <i class="fa-fw fa-solid fa-rotate"></i>
+            <span data-i18n="Refresh">Refresh</span>
+        </div>
+        <div class="remoteBackupDisconnectButton menu_button menu_button_icon" role="button" tabindex="0">
+            <i class="fa-fw fa-solid fa-link-slash"></i>
+            <span data-i18n="Disconnect">Disconnect</span>
+        </div>
+        <label for="remoteSyncLabel"><small data-i18n="Label (optional):">Label (optional):</small></label>
+        <input id="remoteSyncLabel" type="text" class="text_pole" style="max-width:180px;" placeholder="{{today}}">
+    </div>
+    {{#if snapshots.length}}
+    <div>
+        <h4 data-i18n="Snapshots">Snapshots</h4>
+        <div class="rb-table-scroll">
+            <table class="rb-snapshot-table">
+                <thead>
+                    <tr>
+                        <th class="rb-cell-date" data-i18n="Received">Received</th>
+                        <th class="rb-cell-label" data-i18n="Label">Label</th>
+                        <th class="rb-cell-count" data-i18n="Files">Files</th>
+                        <th class="rb-cell-action"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{#each snapshots}}
+                    <tr class="rb-snapshot-row" data-snapshot-id="{{this.id}}" title="{{this.tooltip}}">
+                        <td class="rb-cell-date">{{this.receivedAtFormatted}}</td>
+                        <td class="rb-cell-label">
+                            <span class="rb-label-text">{{this.labelOrDefault}}</span>
+                            {{#if this.bytesLine}}<small class="rb-label-bytes opacity50p">{{this.bytesLine}}</small>{{/if}}
+                        </td>
+                        <td class="rb-cell-count">{{this.fileCountOrDefault}}</td>
+                        <td class="rb-cell-action">
+                            <div class="remoteBackupRestoreButton menu_button menu_button_icon" role="button" tabindex="0" data-snapshot-id="{{this.id}}">
+                                <i class="fa-fw fa-solid fa-file-import"></i>
+                                <span data-i18n="Restore">Restore</span>
+                            </div>
+                        </td>
+                    </tr>
+                    {{/each}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {{else}}
+    <p class="opacity50p" data-i18n="No snapshots yet.">No snapshots yet.</p>
+    {{/if}}
+    {{else}}
+    <div>
+        <p class="opacity50p" data-i18n="Sync your data to a self-hosted TurtleTavern Backupper server.">
+            Sync your data to a self-hosted TurtleTavern Backupper server.
+        </p>
+    </div>
+    <div class="flex-container flexFlowColumn flexNoGap">
+        <label for="remoteBackupUrl"><small data-i18n="Backupper URL">Backupper URL</small></label>
+        <input id="remoteBackupUrl" type="url" class="text_pole" placeholder="https://your-backupper.example.com" autocomplete="off" value="{{savedUrl}}">
+    </div>
+    <div class="flex-container flexFlowColumn flexNoGap">
+        <label for="remoteBackupKey"><small data-i18n="Device Key">Device Key</small></label>
+        <input id="remoteBackupKey" type="password" class="text_pole" placeholder="push + read key from Backupper admin" autocomplete="off">
+        <small class="opacity50p" data-i18n="Get this from the Backupper admin UI. The key must have push and read permissions.">
+            Get this from the Backupper admin UI. The key must have push and read permissions.
+        </small>
+    </div>
+    <div class="flex-container">
+        <div class="remoteBackupSaveButton menu_button menu_button_icon" role="button" tabindex="0">
+            <i class="fa-fw fa-solid fa-save"></i>
+            <span data-i18n="Save">Save</span>
+        </div>
+    </div>
+    {{/if}}
+</div>

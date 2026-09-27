@@ -20,6 +20,7 @@ var ExportableKeys = map[string]bool{
 	"lingva_url":            true,
 	"oneringtranslator_url": true,
 	"deeplx_url":            true,
+	"backupper_url":         true,
 }
 
 type SecretValue struct {
@@ -49,6 +50,13 @@ func NewManager(userRoot, backupsDir string, allowKeysExposure bool) *Manager {
 		backupsDir:        backupsDir,
 		allowKeysExposure: allowKeysExposure,
 	}
+}
+
+// UserManager opens the secrets store that belongs to one user's data root.
+// The backups directory is derived from root so callers cannot pass an
+// inconsistent pair.
+func UserManager(root string, allowKeysExposure bool) *Manager {
+	return NewManager(root, filepath.Join(root, "backups"), allowKeysExposure)
 }
 
 func newUUID() string {

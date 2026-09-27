@@ -226,6 +226,12 @@ func (h *UserDataHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		writeUserDataError(w, http.StatusForbidden, "Full data backup is disabled")
 		return
 	}
+	if !dataOperationMu.TryLock() {
+		writeUserDataError(w, http.StatusConflict, "Another backup or restore is already running")
+		return
+	}
+	defer dataOperationMu.Unlock()
+
 	if !h.prog.begin() {
 		writeUserDataError(w, http.StatusConflict, "A restore is already in progress")
 		return

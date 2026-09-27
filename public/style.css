@@ -6602,3 +6602,132 @@ body:not(.movingUI) .drawer-content.maximized {
     border-radius: 4px;
     transition: width 0.15s ease;
 }
+
+.remoteBackupReachable {
+    color: var(--SmartThemeColor, #4fc3f7);
+}
+
+.remoteBackupUnreachable {
+    color: #e57373;
+}
+
+.remoteBackupError {
+    color: #e57373;
+}
+
+/* Remote backup progress overlay. Sits at body level so it survives the modal
+   closing, and uses 100vw/100vh rather than inset:0 - inset collapses to zero
+   height in the Android WebView (same pitfall as the local restore overlay). */
+.remoteBackupOverlay {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.6);
+}
+
+.remoteBackupProgress {
+    background: var(--SmartThemeBlurTintColor, #1e1e1e);
+    padding: 20px;
+    border-radius: 10px;
+    width: min(90vw, 480px);
+}
+
+.remoteBackupProgressPhase {
+    margin: 0 0 10px 0;
+}
+
+.remoteBackupProgressStatus {
+    display: block;
+    margin-top: 6px;
+    min-height: 1em;
+}
+
+.remoteBackupProgress progress {
+    width: 100%;
+    height: 8px;
+    border-radius: 4px;
+    appearance: none;
+    -webkit-appearance: none;
+    overflow: hidden;
+}
+
+.remoteBackupProgress progress::-webkit-progress-bar {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+}
+
+.remoteBackupProgress progress::-webkit-progress-value {
+    background: var(--SmartThemeBorderColor, #4fc3f7);
+    border-radius: 4px;
+    transition: width 0.15s ease;
+}
+
+.remoteBackupProgress progress::-moz-progress-bar {
+    background: var(--SmartThemeBorderColor, #4fc3f7);
+    border-radius: 4px;
+    transition: width 0.15s ease;
+}
+
+.rb-table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+}
+
+.rb-snapshot-table {
+    width: 100%;
+    min-width: 0;
+    table-layout: auto;
+}
+
+.rb-snapshot-table th,
+.rb-snapshot-table td {
+    border: 1px solid;
+    padding: 4px 6px;
+    vertical-align: top;
+}
+
+.rb-snapshot-table th {
+    white-space: nowrap;
+    text-align: left;
+}
+
+.rb-cell-date {
+    width: 1%;
+    white-space: nowrap;
+}
+
+.rb-cell-label {
+    width: auto;
+}
+
+.rb-label-text {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
+}
+
+.rb-label-bytes {
+    display: block;
+    white-space: nowrap;
+    font-size: 0.85em;
+}
+
+.rb-cell-count {
+    width: 1%;
+    white-space: nowrap;
+    text-align: right;
+}
+
+.rb-cell-action {
+    width: 1%;
+    white-space: nowrap;
+}

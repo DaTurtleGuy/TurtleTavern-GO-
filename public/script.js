@@ -777,8 +777,8 @@ async function firstLoadInit() {
     initServerHistory();
     initSettingsSearch();
     initChatSearch();
-    initFieldSearch();
-    initBulkEdit();
+      initFieldSearch();
+      initBulkEdit();
     initReasoning();
     initWelcomeScreen();
     await initScrapers();

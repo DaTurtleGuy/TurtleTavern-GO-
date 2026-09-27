@@ -126,6 +126,7 @@ func Build(cfg *config.Config, publicDir string) (*Instance, error) {
 		handlers.RegisterDeprecatedRedirects(r)
 		handlers.NewProxyHandler(cfg).RegisterRoutes(r)
 		handlers.NewUserDataHandler(cfg, charIndex).RegisterRoutes(r)
+		handlers.NewRemoteBackupHandler(cfg, charIndex).RegisterRoutes(r)
 
 		content.CheckForNewContent(
 			userDataRoots(cfg.DataDir()),

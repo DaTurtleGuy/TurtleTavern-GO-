@@ -3,6 +3,7 @@ import { POPUP_RESULT, POPUP_TYPE, callGenericPopup } from './popup.js';
 import { renderTemplateAsync } from './templates.js';
 import { ensureImageFormatSupported, getBase64Async, humanFileSize } from './utils.js';
 import { exportUserData, restoreUserData } from './user-data.js';
+import { openRemoteBackupModal } from './remote-backup.js';
 
 /**
  * @type {import('../../src/users.js').UserViewModel} Logged in user
@@ -651,6 +652,7 @@ async function openUserProfile() {
     }));
     template.find('.userBackupButton').on('click', () => exportUserData());
     template.find('.userRestoreButton').on('click', () => restoreUserData());
+    template.find('.remoteBackupButton').on('click', () => openRemoteBackupModal());
     template.find('.userResetSettingsButton').on('click', () => resetSettings(currentUser.handle, () => location.reload()));
     template.find('.userResetAllButton').on('click', () => resetEverything(() => location.reload()));
     template.find('.userAvatarChange').on('click', () => template.find('.avatarUpload').trigger('click'));

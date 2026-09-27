@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/TurtleTavern/turtletavern/internal/util"
 	"gopkg.in/yaml.v3"
@@ -55,6 +56,8 @@ type Config struct {
 	RateLimiting RateLimitingConfig `yaml:"rateLimiting"`
 
 	Backups BackupConfig `yaml:"backups"`
+
+	RemoteBackup RemoteBackupConfig `yaml:"remoteBackup"`
 
 	Thumbnails ThumbnailsConfig `yaml:"thumbnails"`
 
@@ -190,6 +193,24 @@ type BackupChat struct {
 	CheckIntegrity   bool `yaml:"checkIntegrity"`
 	MaxTotalBackups  int  `yaml:"maxTotalBackups"`
 	ThrottleInterval int  `yaml:"throttleInterval"`
+}
+
+// RemoteBackupConfig is the server-level kill switch for the optional remote
+// backup feature. The Backupper URL and device key are deliberately NOT here:
+// they are per-user secrets edited in the UI (secrets.json), exactly like every
+// other API key.
+type RemoteBackupConfig struct {
+	Enabled        bool   `yaml:"enabled"`
+	DeviceName     string `yaml:"deviceName"`
+	TimeoutSeconds int    `yaml:"timeoutSeconds"`
+}
+
+// Timeout returns the HTTP timeout used for Backupper transfers.
+func (c *RemoteBackupConfig) Timeout() time.Duration {
+	if c.TimeoutSeconds <= 0 {
+		return 10 * time.Minute
+	}
+	return time.Duration(c.TimeoutSeconds) * time.Second
 }
 
 type ThumbnailsConfig struct {
@@ -354,6 +375,11 @@ func DefaultConfig() *Config {
 				MaxTotalBackups:  -1,
 				ThrottleInterval: 10000,
 			},
+		},
+
+		RemoteBackup: RemoteBackupConfig{
+			Enabled:        true,
+			TimeoutSeconds: 600,
 		},
 
 		Thumbnails: ThumbnailsConfig{
