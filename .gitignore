@@ -9,4 +9,3 @@ dist/
 app/signing/
 *.jks
 *.keystore
-/internal
