@@ -189,7 +189,7 @@ func (h *CharacterHandler) Import(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	file, header, err := r.FormFile("avatar")
+	file, _, err := r.FormFile("avatar")
 	if err != nil {
 		http.Error(w, "no file", http.StatusBadRequest)
 		return
@@ -523,25 +523,15 @@ func (h *CharacterHandler) Import(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := ""
-	if data, ok := charJSON["data"].(map[string]any); ok {
-		name, _ = data["name"].(string)
-	}
-	if name == "" {
-		name, _ = charJSON["name"].(string)
-	}
-	if name == "" {
-		name = header.Filename
-	}
-
 	fileName := preservedName
 	if hadPreservedName {
 		media.InvalidateThumbnail(uc.Directories.Root, media.ThumbAvatar, fileName+".png")
 	}
 
-	h.Index.UpsertCharacter(uc.Directories.Characters, models.ShallowCharacter{
-		Avatar: fileName + ".png", Name: name,
-	})
+	if !hadPreservedName {
+		setDateAddedEntry(uc.Directories.Characters, fileName, float64(time.Now().UnixMilli()))
+	}
+	h.upsertFull(uc, fileName+".png")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"file_name": fileName})
 }

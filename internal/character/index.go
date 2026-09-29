@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/TurtleTavern/turtletavern/internal/models"
+	"github.com/TurtleTavern/turtletavern/internal/util"
 )
 
 const indexVersion = 1
@@ -179,6 +180,21 @@ func (idx *Index) upsertCharacter(userFolder string, char models.ShallowCharacte
 	if createDate == nil || createDate == "" || createDate == 0.0 {
 		createDate = char.DateAdded
 	}
+	dateAdded := char.DateAdded
+	if dateAdded == 0 || createDate == nil || createDate == "" || createDate == 0.0 {
+		var exAdded, exCreated float64
+		_ = idx.db.QueryRow("SELECT date_added, create_date FROM characters WHERE user_folder=? AND avatar=?",
+			userFolder, char.Avatar).Scan(&exAdded, &exCreated)
+		if dateAdded == 0 {
+			dateAdded = exAdded
+		}
+		if createDate == nil || createDate == "" || createDate == 0.0 {
+			createDate = exCreated
+			if createDate == nil || createDate == 0.0 {
+				createDate = dateAdded
+			}
+		}
+	}
 	if createDate == nil || createDate == 0.0 {
 		createDate = 0.0
 	}
@@ -198,7 +214,7 @@ func (idx *Index) upsertCharacter(userFolder string, char models.ShallowCharacte
 		chat_size, data_size, tags, chat, creator, creator_notes, character_version, mtime)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		userFolder, char.Avatar, char.Name, boolToInt(char.Fav),
-		char.DateAdded, createDate, dateLastChat,
+		dateAdded, createDate, dateLastChat,
 		char.ChatSize, char.DataSize, string(tagsJSON),
 		char.Chat, creator, creatorNotes, charVer, mtime,
 	)
@@ -236,6 +252,33 @@ func (idx *Index) RebuildIndex(userFolder string, processFn func(string, models.
 	return idx.RebuildIndexWithProgress(userFolder, processFn, dirs, nil)
 }
 
+func pruneDateAddedFile(userFolder string, valid map[string]struct{}) {
+	path := filepath.Join(userFolder, "date_added.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var dict map[string]float64
+	if err := json.Unmarshal(data, &dict); err != nil || dict == nil {
+		return
+	}
+	changed := false
+	for k := range dict {
+		if _, ok := valid[k]; !ok {
+			delete(dict, k)
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
+	out, err := json.MarshalIndent(dict, "", "    ")
+	if err != nil {
+		return
+	}
+	_ = util.AtomicWrite(path, out)
+}
+
 // RebuildIndexWithProgress is RebuildIndex while reporting how many characters
 // have been handled, so a caller can drive a progress bar. onProgress may be nil.
 func (idx *Index) RebuildIndexWithProgress(userFolder string, processFn func(string, models.UserDirectories, bool) (*models.ShallowCharacter, error), dirs models.UserDirectories, onProgress func(done, total int)) []models.ShallowCharacter {
@@ -253,6 +296,11 @@ func (idx *Index) RebuildIndexWithProgress(userFolder string, processFn func(str
 			pngs = append(pngs, e.Name())
 		}
 	}
+	keep := make(map[string]struct{}, len(pngs))
+	for _, n := range pngs {
+		keep[strings.TrimSuffix(n, ".png")] = struct{}{}
+	}
+	pruneDateAddedFile(userFolder, keep)
 	if onProgress != nil {
 		onProgress(0, len(pngs))
 	}

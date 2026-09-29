@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/TurtleTavern/turtletavern/internal/character"
 	"github.com/TurtleTavern/turtletavern/internal/media"
@@ -105,7 +106,8 @@ func (h *CharacterHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	avatarName := fileName + ".png"
-	h.Index.UpsertCharacter(uc.Directories.Characters, models.ShallowCharacter{Avatar: avatarName, Name: chName})
+	setDateAddedEntry(uc.Directories.Characters, fileName, float64(time.Now().UnixMilli()))
+	h.upsertFull(uc, avatarName)
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write([]byte(avatarName))
 }
@@ -153,7 +155,7 @@ func (h *CharacterHandler) Edit(w http.ResponseWriter, r *http.Request) {
 		inputImage, _ := os.ReadFile(avatarPath)
 		character.WriteCharacterDataToFile(inputImage, string(charJSON), targetFile, uc.Directories)
 	}
-	h.Index.UpsertCharacter(uc.Directories.Characters, models.ShallowCharacter{Avatar: avatarURL, Name: chName})
+	h.upsertFull(uc, avatarURL)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -248,6 +250,7 @@ func (h *CharacterHandler) EditAttribute(w http.ResponseWriter, r *http.Request)
 	targetFile := strings.TrimSuffix(body.AvatarURL, ".png")
 	imgBytes, _ := os.ReadFile(charPath)
 	character.WriteCharacterDataToFile(imgBytes, string(charJSON), targetFile, uc.Directories)
+	h.upsertFull(uc, body.AvatarURL)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -289,8 +292,7 @@ func (h *CharacterHandler) MergeAttributes(w http.ResponseWriter, r *http.Reques
 	targetFile := strings.TrimSuffix(avatar, ".png")
 	imgBytes, _ := os.ReadFile(charPath)
 	character.WriteCharacterDataToFile(imgBytes, string(charJSON), targetFile, uc.Directories)
-	mergedName, _ := merged["name"].(string)
-	h.Index.UpsertCharacter(uc.Directories.Characters, models.ShallowCharacter{Avatar: avatar, Name: mergedName})
+	h.upsertFull(uc, avatar)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -316,6 +318,58 @@ func removeDateAddedEntry(charactersDir, dirName string) {
 	}
 }
 
+func setDateAddedEntry(charactersDir, base string, ms float64) {
+	if base == "" {
+		return
+	}
+	dictPath := filepath.Join(charactersDir, "date_added.json")
+	dict := make(map[string]any)
+	if data, err := os.ReadFile(dictPath); err == nil {
+		_ = json.Unmarshal(data, &dict)
+	}
+	dict[base] = ms
+	if out, err := json.MarshalIndent(dict, "", "    "); err == nil {
+		_ = util.AtomicWrite(dictPath, out)
+	}
+}
+
+func moveDateAddedEntry(charactersDir, oldBase, newBase string) {
+	if oldBase == "" || newBase == "" || oldBase == newBase {
+		return
+	}
+	dictPath := filepath.Join(charactersDir, "date_added.json")
+	data, err := os.ReadFile(dictPath)
+	if err != nil {
+		return
+	}
+	var dict map[string]any
+	if err := json.Unmarshal(data, &dict); err != nil {
+		return
+	}
+	oldVal, ok := dict[oldBase]
+	if !ok {
+		return
+	}
+	if _, exists := dict[newBase]; !exists {
+		dict[newBase] = oldVal
+	}
+	delete(dict, oldBase)
+	if out, err := json.MarshalIndent(dict, "", "    "); err == nil {
+		_ = util.AtomicWrite(dictPath, out)
+	}
+}
+
+func (h *CharacterHandler) upsertFull(uc *models.UserContext, avatar string, nameOverride ...string) {
+	sc, err := character.ProcessCharacter(avatar, uc.Directories, true)
+	if err != nil || sc == nil {
+		log.Printf("character index upsert skipped for %s: %v", avatar, err)
+		return
+	}
+	if len(nameOverride) > 0 && nameOverride[0] != "" {
+		sc.Name = nameOverride[0]
+	}
+	h.Index.UpsertCharacter(uc.Directories.Characters, *sc)
+}
 func (h *CharacterHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	uc := getUserCtx(r)
 	if uc == nil {
@@ -412,7 +466,8 @@ func (h *CharacterHandler) Rename(w http.ResponseWriter, r *http.Request) {
 
 	os.Remove(oldPath)
 	h.Index.DeleteCharacter(uc.Directories.Characters, body.AvatarURL)
-	h.Index.UpsertCharacter(uc.Directories.Characters, models.ShallowCharacter{Avatar: newInternal + ".png", Name: newName})
+	moveDateAddedEntry(uc.Directories.Characters, oldInternal, newInternal)
+	h.upsertFull(uc, newInternal+".png")
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"avatar": newInternal + ".png"})
@@ -456,7 +511,8 @@ func (h *CharacterHandler) Duplicate(w http.ResponseWriter, r *http.Request) {
 	}
 	dstPath := filepath.Join(uc.Directories.Characters, newFilename)
 	util.CopyFile(srcPath, dstPath)
-	h.Index.UpsertCharacter(uc.Directories.Characters, models.ShallowCharacter{Avatar: newFilename, Name: nameBase})
+	setDateAddedEntry(uc.Directories.Characters, strings.TrimSuffix(newFilename, ".png"), float64(time.Now().UnixMilli()))
+	h.upsertFull(uc, newFilename, nameBase)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"path": newFilename})
