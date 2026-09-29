@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"io"
 	"log"
@@ -633,7 +635,119 @@ func getChatFileInfo(path string) models.ChatInfo {
 	return getChatFileInfoEx(path, false, nil, nil)
 }
 
+// chatScanLine decodes only the field the listing/search path needs from a
+// chat JSONL line. Decoding into this small struct is far cheaper than a
+// map[string]any, which matters when a search touches every line of every
+// chat file.
+type chatScanLine struct {
+	Mes string `json:"mes"`
+}
+
+// scanChatFile streams a chat JSONL file line by line (constant memory, no
+// 64 KiB scanner limit) and reports its info. frags are pre-lowercased query
+// fragments; a file matches when every fragment appears in the mes text of
+// some message — the same verdict as the old cumulative-buffer matcher, but
+// tracked incrementally (O(N) instead of O(N^2)).
+func scanChatFile(path string, withMetadata bool, additional map[string]any, frags []string) models.ChatInfo {
+	info := models.ChatInfo{Match: false, Mes: "[The chat is empty]"}
+	stat, err := os.Stat(path)
+	if err != nil {
+		return models.ChatInfo{}
+	}
+	info.FileName = filepath.Base(path)
+	info.FileID = strings.TrimSuffix(info.FileName, ".jsonl")
+	info.FileSize = util.FormatBytes(stat.Size())
+	info.LastMes = float64(stat.ModTime().UnixMilli())
+	applyAdditionalData(&info, additional)
+	if stat.Size() == 0 {
+		return info
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return models.ChatInfo{}
+	}
+	defer f.Close()
+
+	found := make([]bool, len(frags))
+	remaining := len(frags)
+	matched := len(frags) == 0
+	var lastLine []byte
+	var firstLine []byte
+	count := 0
+	br := bufio.NewReaderSize(f, 64*1024)
+	for {
+		// ReadBytes (not Scanner): a single long roleplay message would
+		// exceed Scanner's token limit and silently truncate the file.
+		// Each call returns a fresh slice, so retaining line is safe.
+		raw, rerr := br.ReadBytes('\n')
+		if line := bytes.TrimSpace(raw); len(line) > 0 {
+			count++
+			if firstLine == nil {
+				firstLine = line
+			}
+			var sl chatScanLine
+			if json.Unmarshal(line, &sl) == nil {
+				lastLine = line
+				// count > 1 skips the header line, mirroring the old i > 0
+				// guard. Each mes is lowercased once and folded into the
+				// per-fragment flags — no rescan of earlier messages.
+				if !matched && count > 1 && sl.Mes != "" {
+					lower := strings.ToLower(sl.Mes)
+					for i, frag := range frags {
+						if !found[i] && strings.Contains(lower, frag) {
+							found[i] = true
+							remaining--
+							if remaining == 0 {
+								matched = true
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+		if rerr != nil {
+			break
+		}
+	}
+	if lastLine == nil {
+		return models.ChatInfo{}
+	}
+	var last map[string]any
+	if err := json.Unmarshal(lastLine, &last); err != nil {
+		return models.ChatInfo{}
+	}
+	_, hasName := last["name"]
+	_, hasCharName := last["character_name"]
+	_, hasMeta := last["chat_metadata"]
+	if !hasName && !hasCharName && !hasMeta {
+		return models.ChatInfo{}
+	}
+	info.ChatItems = count - 1
+	if mes, ok := last["mes"].(string); ok && mes != "" {
+		info.Mes = mes
+	} else {
+		info.Mes = "[The message is empty]"
+	}
+	if sendDate, ok := last["send_date"]; ok && sendDate != nil {
+		info.LastMes = sendDate
+	}
+	if withMetadata && firstLine != nil {
+		var first map[string]any
+		if err := json.Unmarshal(firstLine, &first); err == nil {
+			if meta, ok := first["chat_metadata"].(map[string]any); ok {
+				info.ChatMetadata = meta
+			}
+		}
+	}
+	info.Match = matched
+	return info
+}
+
 func getChatFileInfoEx(path string, withMetadata bool, additional map[string]any, matcher func([]string) bool) models.ChatInfo {
+	if matcher == nil {
+		return scanChatFile(path, withMetadata, additional, nil)
+	}
 	info := models.ChatInfo{Match: false, Mes: "[The chat is empty]"}
 	stat, err := os.Stat(path)
 	if err != nil {

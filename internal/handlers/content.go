@@ -1118,19 +1118,34 @@ func (h *ContentHandler) BackupChatGet(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	var out []models.ChatInfo
+	var paths []string
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" || !strings.HasPrefix(e.Name(), "chat_") {
 			continue
 		}
-		info := getChatFileInfo(filepath.Join(uc.Directories.Backups, e.Name()))
+		paths = append(paths, filepath.Join(uc.Directories.Backups, e.Name()))
+	}
+	// Scan files in parallel, then filter in directory order after every
+	// worker finishes, so the response is always the complete set.
+	infos := make([]models.ChatInfo, len(paths))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	for i, p := range paths {
+		wg.Add(1)
+		go func(idx int, path string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			infos[idx] = getChatFileInfo(path)
+		}(i, p)
+	}
+	wg.Wait()
+	out := []models.ChatInfo{}
+	for _, info := range infos {
 		if info.FileName == "" {
 			continue
 		}
 		out = append(out, info)
-	}
-	if out == nil {
-		out = []models.ChatInfo{}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)

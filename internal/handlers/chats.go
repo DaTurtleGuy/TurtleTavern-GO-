@@ -860,28 +860,18 @@ func (h *ChatHandler) Search(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	fragments := strings.Fields(strings.ToLower(strings.TrimSpace(body.Query)))
-	hasTextMatch := func(texts []string) bool {
-		if len(fragments) == 0 {
+	lowerFrags := strings.Fields(strings.ToLower(strings.TrimSpace(body.Query)))
+	filenameMatch := func(fileID string) bool {
+		if len(lowerFrags) == 0 {
 			return true
 		}
-		for _, frag := range fragments {
-			found := false
-			for _, text := range texts {
-				if strings.Contains(strings.ToLower(text), frag) {
-					found = true
-					break
-				}
-			}
-			if !found {
+		lower := strings.ToLower(fileID)
+		for _, frag := range lowerFrags {
+			if !strings.Contains(lower, frag) {
 				return false
 			}
 		}
 		return true
-	}
-	var matcher func([]string) bool
-	if body.Query != "" {
-		matcher = hasTextMatch
 	}
 	type searchResult struct {
 		FileName     string `json:"file_name"`
@@ -890,20 +880,36 @@ func (h *ChatHandler) Search(w http.ResponseWriter, r *http.Request) {
 		LastMes      any    `json:"last_mes"`
 		PreviewMes   string `json:"preview_message"`
 	}
+	// Scan files in parallel, but collect every result before responding:
+	// the response is only written after wg.Wait, so it always reflects the
+	// complete set of matches, never a partial stream.
+	infos := make([]models.ChatInfo, len(chatFiles))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	for i, cf := range chatFiles {
+		wg.Add(1)
+		go func(idx int, path string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			infos[idx] = scanChatFile(path, false, nil, lowerFrags)
+		}(i, cf)
+	}
+	wg.Wait()
 	results := []searchResult{}
-	for _, cf := range chatFiles {
-		info := getChatFileInfoEx(cf, false, nil, matcher)
+	for i := range chatFiles {
+		info := infos[i]
 		if info.FileName == "" {
 			continue
 		}
-		hasMatch := info.Match || hasTextMatch([]string{info.FileID})
+		hasMatch := info.Match || filenameMatch(info.FileID)
 		if body.Query != "" && info.ChatItems == 0 && !hasMatch {
 			continue
 		}
 		if body.Query == "" || hasMatch {
 			preview := info.Mes
-			if len(preview) > 400 {
-				preview = "..." + preview[len(preview)-400:]
+			if rs := []rune(preview); len(rs) > 400 {
+				preview = "..." + string(rs[len(rs)-400:])
 			}
 			results = append(results, searchResult{
 				FileName:     info.FileID,

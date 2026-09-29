@@ -8,7 +8,9 @@ Go rewrite of SillyTavern's backend. Serves the **unchanged** SillyTavern fronte
 
 - Module: `github.com/TurtleTavern/turtletavern`
 - Go 1.26, pure Go deps (chi, tiktoken, yaml.v3, modernc.org/sqlite)
-- No git repo — local-only
+- Git repo with a GitHub remote: `origin` =
+  `https://github.com/DaTurtleGuy/TurtleTavern-GO-.git` (prereleases/tags live there;
+  the root `AGENTS.md` covers the release-vs-debug APK rules)
 
 ## Node.js (TurtleTavern) Backup/Restore Parity (2026-09-14)
 
@@ -38,7 +40,7 @@ Cause: seccomp prevented call to disallowed x86_64 system call 6
   (`sqlite3_open_v2` present, modernc absent — still crashes).
 - **Conclusion: the app is arm64-only.** Enforced two ways:
   1. `gomobile bind -target=android/arm64` (no amd64 in the AAR)
-  2. `ndk { abiFilters += "arm64-v8a" }` in `TurtleTavern_Mobile/app/build.gradle.kts`
+  2. `ndk { abiFilters += "arm64-v8a" }` in `TurtleTavern Mobile/app/build.gradle.kts` (line 42)
 - `MainActivity` shows an "Arch not supported" error if launched on non-arm64.
 - **arm64 AVD on an x86_64 Windows host is IMPOSSIBLE**: emulator panics
   (`Avd's CPU Architecture 'arm64' is not supported by the QEMU2 emulator on x86_64 host`).
@@ -48,8 +50,21 @@ Cause: seccomp prevented call to disallowed x86_64 system call 6
 
 - `internal/character/driver_android.go` (`//go:build android`) → `mattn/go-sqlite3`, `CGO_ENABLED=1`
 - `internal/character/driver_desktop.go` (`//go:build !android`) → `modernc.org/sqlite`, `CGO_ENABLED=0`
-- **CGO is broken on the Windows host even for desktop builds** (TDM64 gcc produces a
-  PE file Windows refuses to run: `WinError 193`). Desktop must stay `CGO_ENABLED=0`.
+- Desktop builds use `CGO_ENABLED=0` **by choice**, not because cgo is broken: the
+  pure-Go driver means shipping a desktop binary needs no C toolchain.
+- **CGO works on this Windows host — re-verified 2026-09-26.** TDM64 gcc 10.3.0 is on
+  PATH (`C:\TDM-GCC-64\bin\gcc.exe`), and `CGO_ENABLED=1 go build -o <tmp>/gotavern.exe
+  ./cmd/server` produced a working 34 MB PE that started and listened on 127.0.0.1:8000.
+  The older note here ("TDM64 gcc produces a PE file Windows refuses to run:
+  `WinError 193`") **did not reproduce**. `WinError 193` is the error you get from trying
+  to *run* a non-Windows binary on Windows — e.g. the android/arm64 build — which is
+  probably what that note actually observed.
+- **Why cgo looks disabled by default (the real gotcha):** `CGO_ENABLED=0` is persisted
+  in the machine's Go env file (`go env -w`, stored at `%APPDATA%\go\env`), so *every*
+  `go` invocation here defaults to cgo off. Anything needing cgo must set
+  `CGO_ENABLED=1` explicitly — notably `go test -race`, which otherwise fails with
+  `go: -race requires cgo`. The Termux/gomobile commands below already pass it, which is
+  why they work.
 - Android builds need CGO anyway (DNS + TLS system roots), see the Termux section.
 
 ## Android WebView Shell Gotchas (TurtleTavern_Mobile)

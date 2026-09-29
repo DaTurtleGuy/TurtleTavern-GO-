@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	buildPkgVersion  = "0.1.7 (BETA)"
+	buildPkgVersion  = "0.1.8A (BETA)"
 	buildGitRevision = ""
 	buildGitBranch   = ""
 	buildCommitDate  = ""
@@ -45,7 +45,7 @@ func resolveVersionInfo() models.VersionInfo {
 		GitRevision: buildGitRevision,
 		GitBranch:   buildGitBranch,
 		CommitDate:  buildCommitDate,
-		Agent:       "TurtleTavern:0.1.7:BETA",
+		Agent:       "TurtleTavern:0.1.8A:BETA",
 	}
 }
 

@@ -52,3 +52,21 @@
 .chatBackupsListItemActions .right_menu_button {
     font-size: var(--mainFontSize);
 }
+
+/* The Backups button is injected into the Chat History header row ahead of
+   the search field. That extra item squeezed #select_chat_search (flex: 1,
+   but inputs refuse to shrink below their intrinsic width) into a sliver on
+   narrow screens. Let the header wrap and give the search a usable floor so
+   it drops to its own full-width line instead of being crushed. */
+div[name="selectChatPopupHeader"] {
+    flex-wrap: wrap;
+}
+
+div[name="selectChatPopupHeader"] > .menu_button {
+    flex-shrink: 0;
+}
+
+#select_chat_search {
+    flex: 1 1 140px;
+    min-width: 140px;
+}
