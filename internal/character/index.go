@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/TurtleTavern/turtletavern/internal/models"
 	"github.com/TurtleTavern/turtletavern/internal/util"
@@ -160,6 +161,13 @@ func (idx *Index) getAllCharacters(userFolder string) []models.ShallowCharacter 
 	return result
 }
 
+// dbExecer is satisfied by both *sql.DB and *sql.Tx, so the rebuild can run
+// its upserts inside one transaction while single upserts keep using the DB.
+type dbExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 func (idx *Index) UpsertCharacter(userFolder string, char models.ShallowCharacter) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
@@ -167,6 +175,10 @@ func (idx *Index) UpsertCharacter(userFolder string, char models.ShallowCharacte
 }
 
 func (idx *Index) upsertCharacter(userFolder string, char models.ShallowCharacter) {
+	idx.upsertCharacterDB(idx.db, userFolder, char)
+}
+
+func (idx *Index) upsertCharacterDB(db dbExecer, userFolder string, char models.ShallowCharacter) {
 	mtime := 0.0
 	p := filepath.Join(userFolder, char.Avatar)
 	if info, err := os.Stat(p); err == nil {
@@ -183,7 +195,7 @@ func (idx *Index) upsertCharacter(userFolder string, char models.ShallowCharacte
 	dateAdded := char.DateAdded
 	if dateAdded == 0 || createDate == nil || createDate == "" || createDate == 0.0 {
 		var exAdded, exCreated float64
-		_ = idx.db.QueryRow("SELECT date_added, create_date FROM characters WHERE user_folder=? AND avatar=?",
+		_ = db.QueryRow("SELECT date_added, create_date FROM characters WHERE user_folder=? AND avatar=?",
 			userFolder, char.Avatar).Scan(&exAdded, &exCreated)
 		if dateAdded == 0 {
 			dateAdded = exAdded
@@ -204,12 +216,12 @@ func (idx *Index) upsertCharacter(userFolder string, char models.ShallowCharacte
 	dateLastChat := char.DateLastChat
 	if dateLastChat == 0 {
 		var existing float64
-		_ = idx.db.QueryRow("SELECT date_last_chat FROM characters WHERE user_folder=? AND avatar=?",
+		_ = db.QueryRow("SELECT date_last_chat FROM characters WHERE user_folder=? AND avatar=?",
 			userFolder, char.Avatar).Scan(&existing)
 		dateLastChat = existing
 	}
 
-	idx.db.Exec(`INSERT OR REPLACE INTO characters
+	db.Exec(`INSERT OR REPLACE INTO characters
 		(user_folder, avatar, name, fav, date_added, create_date, date_last_chat,
 		chat_size, data_size, tags, chat, creator, creator_notes, character_version, mtime)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -305,21 +317,54 @@ func (idx *Index) RebuildIndexWithProgress(userFolder string, processFn func(str
 		onProgress(0, len(pngs))
 	}
 
-	var results []models.ShallowCharacter
+	// Card parsing is CPU- and IO-bound with no shared state, so it fans out
+	// across workers; the SQLite writes stay serial inside one transaction.
+	// Results keep directory order: the response must not depend on which
+	// worker finished first.
+	type rebuildOut struct {
+		char *models.ShallowCharacter
+	}
+	outs := make([]rebuildOut, len(pngs))
+	var done atomic.Int64
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
 	for i, name := range pngs {
-		char, err := processFn(name, dirs, true)
-		if err != nil || char == nil || char.Name == "" {
-			if onProgress != nil {
-				onProgress(i+1, len(pngs))
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			char, err := processFn(name, dirs, true)
+			if err == nil && char != nil && char.Name != "" {
+				outs[i].char = char
 			}
+			if onProgress != nil {
+				onProgress(int(done.Add(1)), len(pngs))
+			}
+		}(i, name)
+	}
+	wg.Wait()
+
+	tx, err := idx.db.Begin()
+	if err != nil {
+		tx = nil
+	}
+	var db dbExecer = idx.db
+	if tx != nil {
+		db = tx
+	}
+	var results []models.ShallowCharacter
+	for _, o := range outs {
+		if o.char == nil {
 			continue
 		}
-		idx.upsertCharacter(userFolder, *char)
-		results = append(results, *char)
-		if onProgress != nil {
-			onProgress(i+1, len(pngs))
-		}
+		idx.upsertCharacterDB(db, userFolder, *o.char)
+		results = append(results, *o.char)
 	}
+	if tx != nil {
+		_ = tx.Commit()
+	}
+	FlushDateAddedCache(userFolder)
 	return results
 }
 

@@ -15,7 +15,71 @@ import (
 var (
 	charCache   = sync.Map{}
 	cacheStats  = sync.Map{}
+	dateCaches  = sync.Map{}
 )
+
+// DateAddedCache holds one characters dir's date_added.json in memory so a
+// rebuild doesn't re-read and re-parse the whole file per character. Every
+// snapshot written is a consistent view (marshal under lock), so concurrent
+// flushes converge instead of clobbering each other.
+type DateAddedCache struct {
+	mu    sync.Mutex
+	path  string
+	data  map[string]float64
+	dirty bool
+}
+
+func dateCacheFor(charactersDir string) *DateAddedCache {
+	if c, ok := dateCaches.Load(charactersDir); ok {
+		return c.(*DateAddedCache)
+	}
+	c := &DateAddedCache{
+		path: filepath.Join(charactersDir, "date_added.json"),
+		data: map[string]float64{},
+	}
+	if raw, err := os.ReadFile(c.path); err == nil {
+		_ = json.Unmarshal(raw, &c.data)
+		if c.data == nil {
+			c.data = map[string]float64{}
+		}
+	}
+	actual, _ := dateCaches.LoadOrStore(charactersDir, c)
+	return actual.(*DateAddedCache)
+}
+
+// FlushDateAddedCache writes the shared cache for dir if it changed. Called
+// once at the end of a rebuild; single ProcessCharacter calls flush inline.
+func FlushDateAddedCache(charactersDir string) {
+	if c, ok := dateCaches.Load(charactersDir); ok {
+		c.(*DateAddedCache).Flush()
+	}
+}
+
+func (c *DateAddedCache) Get(name string) (float64, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	v, ok := c.data[name]
+	return v, ok
+}
+
+func (c *DateAddedCache) Set(name string, ts float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.data[name] = ts
+	c.dirty = true
+}
+
+func (c *DateAddedCache) Flush() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.dirty {
+		return
+	}
+	if out, err := json.MarshalIndent(c.data, "", "    "); err == nil {
+		_ = util.AtomicWrite(c.path, out)
+	}
+	c.dirty = false
+}
 
 func ProcessCharacter(item string, dirs models.UserDirectories, shallow bool) (*models.ShallowCharacter, error) {
 	imgFile := filepath.Join(dirs.Characters, item)
@@ -30,14 +94,9 @@ func ProcessCharacter(item string, dirs models.UserDirectories, shallow bool) (*
 	}
 
 	fileNameWithoutExt := strings.TrimSuffix(item, ".png")
-	dateAddedFile := filepath.Join(dirs.Characters, "date_added.json")
-	dateAddedData := make(map[string]float64)
-	if data, err := os.ReadFile(dateAddedFile); err == nil {
-		json.Unmarshal(data, &dateAddedData)
-	}
-
+	cache := dateCacheFor(dirs.Characters)
 	charStat, _ := os.Stat(imgFile)
-	dateAdded, hasEntry := dateAddedData[fileNameWithoutExt]
+	dateAdded, hasEntry := cache.Get(fileNameWithoutExt)
 	needSave := false
 	if !hasEntry {
 		// A missing entry must not be filled from the PNG mtime: after a restore that
@@ -49,7 +108,7 @@ func ProcessCharacter(item string, dirs models.UserDirectories, shallow bool) (*
 		} else if charStat != nil {
 			dateAdded = float64(charStat.ModTime().UnixMilli())
 		}
-		dateAddedData[fileNameWithoutExt] = dateAdded
+		cache.Set(fileNameWithoutExt, dateAdded)
 		needSave = true
 	}
 
@@ -82,8 +141,7 @@ func ProcessCharacter(item string, dirs models.UserDirectories, shallow bool) (*
 	result["json_data"] = imgData
 
 	if needSave {
-		dataJSON, _ := json.MarshalIndent(dateAddedData, "", "    ")
-		_ = util.AtomicWrite(dateAddedFile, dataJSON)
+		cache.Flush()
 	}
 
 	if shallow {
@@ -103,14 +161,9 @@ func ProcessCharacterFull(item string, dirs models.UserDirectories) (map[string]
 		return nil, fmt.Errorf("invalid JSON in %s: %w", item, err)
 	}
 
-	dateAddedFile := filepath.Join(dirs.Characters, "date_added.json")
-	dateAddedData := make(map[string]float64)
-	if data, err := os.ReadFile(dateAddedFile); err == nil {
-		json.Unmarshal(data, &dateAddedData)
-	}
 	fileNameWithoutExt := strings.TrimSuffix(item, ".png")
 	charStat, _ := os.Stat(imgFile)
-	dateAdded, hasEntry := dateAddedData[fileNameWithoutExt]
+	dateAdded, hasEntry := dateCacheFor(dirs.Characters).Get(fileNameWithoutExt)
 	if !hasEntry {
 		if oldest, ok := ChatOldestSendDate(filepath.Join(dirs.Chats, fileNameWithoutExt)); ok {
 			dateAdded = oldest

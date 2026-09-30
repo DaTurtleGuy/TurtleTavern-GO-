@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -132,47 +134,74 @@ func sanitizeAlnum(name string) string {
 }
 
 func checkChatIntegrity(filePath, slug string) bool {
-	data, err := os.ReadFile(filePath)
+	f, err := os.Open(filePath)
 	if err != nil {
 		return true
 	}
-	lines := strings.SplitN(string(data), "\n", 2)
-	if len(lines) == 0 {
+	defer f.Close()
+	// Only the first line matters; the old code read the entire file for this.
+	br := bufio.NewReaderSize(f, 64*1024)
+	raw, _ := br.ReadBytes('\n')
+	line := bytes.TrimSpace(raw)
+	if len(line) == 0 {
 		return true
 	}
-	var first map[string]any
-	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+	var first struct {
+		ChatMetadata struct {
+			Integrity string `json:"integrity"`
+		} `json:"chat_metadata"`
+	}
+	if err := json.Unmarshal(line, &first); err != nil {
 		return true
 	}
-	meta, ok := first["chat_metadata"].(map[string]any)
-	if !ok {
-		return true
-	}
-	existing, _ := meta["integrity"].(string)
+	existing := first.ChatMetadata.Integrity
 	if existing == "" {
 		return true
 	}
 	return existing == slug
 }
 
-func (h *ChatHandler) trySaveChat(chatData []map[string]any, filePath, handle, cardName, backupDir string, skipIntegrityCheck bool) error {
-	var sb strings.Builder
-	for i, msg := range chatData {
-		b, err := json.Marshal(msg)
-		if err != nil {
-			continue
+// chatElementsAreObjects preserves the old decode-time strictness: the chat
+// array must hold JSON objects (a lone null element is grandfathered in,
+// matching the old map decode). Anything else is a bad request.
+func chatElementsAreObjects(chatData []json.RawMessage) bool {
+	for _, raw := range chatData {
+		t := bytes.TrimSpace(raw)
+		if len(t) == 0 {
+			return false
 		}
+		if t[0] != '{' && string(t) != "null" {
+			return false
+		}
+	}
+	return true
+}
+
+func (h *ChatHandler) trySaveChat(chatData []json.RawMessage, filePath, handle, cardName, backupDir string, skipIntegrityCheck bool) error {
+	total := len(chatData)
+	for _, raw := range chatData {
+		total += len(raw)
+	}
+	var sb strings.Builder
+	sb.Grow(total)
+	for i, raw := range chatData {
 		if i > 0 {
 			sb.WriteByte('\n')
 		}
-		sb.Write(b)
+		// Pass through byte-for-byte: no decode/re-encode roundtrip, so the
+		// file keeps the frontend's exact formatting and key order.
+		sb.Write(bytes.TrimSpace(raw))
 	}
 	doCheck := h.Cfg.Backups.Chat.CheckIntegrity && !skipIntegrityCheck
 	var slug string
 	if doCheck && len(chatData) > 0 {
-		if meta, ok := chatData[0]["chat_metadata"].(map[string]any); ok {
-			slug, _ = meta["integrity"].(string)
+		var first struct {
+			ChatMetadata struct {
+				Integrity string `json:"integrity"`
+			} `json:"chat_metadata"`
 		}
+		_ = json.Unmarshal(chatData[0], &first)
+		slug = first.ChatMetadata.Integrity
 	}
 	if slug != "" && !checkChatIntegrity(filePath, slug) {
 		return &integrityMismatchError{msg: "Chat integrity check failed for \"" + filePath + "\""}
@@ -184,36 +213,49 @@ func (h *ChatHandler) trySaveChat(chatData []map[string]any, filePath, handle, c
 	return nil
 }
 
-func getChatData(chatFilePath string) []map[string]any {
-	data, err := os.ReadFile(chatFilePath)
+// streamChatArray writes the chat file as a JSON array without decoding
+// message bodies: each line is validated and passed through byte-for-byte.
+// It returns the message count, or -1 when the file cannot be read.
+func streamChatArray(w io.Writer, chatFilePath string) int {
+	f, err := os.Open(chatFilePath)
 	if err != nil {
 		log.Printf("[Chats] cannot read chat file %s: %v", chatFilePath, err)
-		return nil
+		return -1
 	}
-	var result []map[string]any
+	defer f.Close()
 	skipped := 0
-	// strings.Split, not bufio.Scanner: Scanner's default 64 KiB token limit
-	// silently aborts on the first oversized line (one long roleplay message is
-	// enough) and truncates the rest of the chat.
-	for i, raw := range strings.Split(string(data), "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" {
-			continue
-		}
-		var msg map[string]any
-		if err := json.Unmarshal([]byte(line), &msg); err != nil {
-			skipped++
-			if skipped <= 5 {
-				log.Printf("[Chats] skipping malformed line %d in %s: %v", i+1, filepath.Base(chatFilePath), err)
+	count := 0
+	// ReadBytes, not Scanner: messages routinely exceed Scanner's 64 KiB limit.
+	br := bufio.NewReaderSize(f, 64*1024)
+	w.Write([]byte("["))
+	for {
+		raw, rerr := br.ReadBytes('\n')
+		line := bytes.TrimSpace(raw)
+		if len(line) > 0 {
+			// The old map decode accepted exactly JSON objects (plus a
+			// top-level null element); anything else was skipped.
+			if (line[0] == '{' && json.Valid(line)) || string(line) == "null" {
+				if count > 0 {
+					w.Write([]byte(","))
+				}
+				w.Write(line)
+				count++
+			} else {
+				skipped++
+				if skipped <= 5 {
+					log.Printf("[Chats] skipping malformed line in %s", filepath.Base(chatFilePath))
+				}
 			}
-			continue
 		}
-		result = append(result, msg)
+		if rerr != nil {
+			break
+		}
 	}
+	w.Write([]byte("]"))
 	if skipped > 0 {
-		log.Printf("[Chats] %s: loaded %d messages, skipped %d malformed lines", filepath.Base(chatFilePath), len(result), skipped)
+		log.Printf("[Chats] %s: loaded %d messages, skipped %d malformed lines", filepath.Base(chatFilePath), count, skipped)
 	}
-	return result
+	return count
 }
 
 func (h *ChatHandler) Save(w http.ResponseWriter, r *http.Request) {
@@ -223,12 +265,16 @@ func (h *ChatHandler) Save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		AvatarURL string           `json:"avatar_url"`
-		FileName  string           `json:"file_name"`
-		Chat      []map[string]any `json:"chat"`
-		Force     bool             `json:"force"`
+		AvatarURL string            `json:"avatar_url"`
+		FileName  string            `json:"file_name"`
+		Chat      []json.RawMessage `json:"chat"`
+		Force     bool              `json:"force"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Chat == nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if !chatElementsAreObjects(body.Chat) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -305,13 +351,13 @@ func (h *ChatHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	chatFilePath := filepath.Join(chatDir, util.SanitizeFileName(body.FileName+".jsonl"))
-	data := getChatData(chatFilePath)
-	if data == nil {
-		data = []map[string]any{}
-	}
-	log.Printf("[Chats] loaded %q for %q: %d messages", body.FileName, body.AvatarURL, len(data))
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	n := streamChatArray(w, chatFilePath)
+	if n < 0 {
+		w.Write([]byte("[]"))
+		n = 0
+	}
+	log.Printf("[Chats] loaded %q for %q: %d messages", body.FileName, body.AvatarURL, n)
 }
 
 func (h *ChatHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -1156,11 +1202,15 @@ func (h *ChatHandler) GroupSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		ID    string           `json:"id"`
-		Chat  []map[string]any `json:"chat"`
-		Force bool             `json:"force"`
+		ID    string            `json:"id"`
+		Chat  []json.RawMessage `json:"chat"`
+		Force bool              `json:"force"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Chat == nil || body.ID == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if !chatElementsAreObjects(body.Chat) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -1195,12 +1245,10 @@ func (h *ChatHandler) GroupGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	chatFilePath := filepath.Join(uc.Directories.GroupChats, util.SanitizeFileName(body.ID+".jsonl"))
-	data := getChatData(chatFilePath)
-	if data == nil {
-		data = []map[string]any{}
-	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	if streamChatArray(w, chatFilePath) < 0 {
+		w.Write([]byte("[]"))
+	}
 }
 
 func (h *ChatHandler) GroupInfo(w http.ResponseWriter, r *http.Request) {

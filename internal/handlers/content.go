@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bufio"
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
@@ -984,44 +986,121 @@ func collectChatStats(chatsPath, charactersPath string) map[string]any {
 		final["timestamp"] = float64(time.Now().UnixMilli())
 		return final
 	}
+	var pngs []string
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".png") {
-			continue
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".png") {
+			pngs = append(pngs, e.Name())
 		}
-		stats := map[string]any{
-			"total_gen_time": 0.0, "user_word_count": 0.0, "non_user_word_count": 0.0,
-			"user_msg_count": 0.0, "non_user_msg_count": 0.0, "total_swipe_count": 0.0,
-			"chat_size": 0.0, "date_last_chat": 0.0, "date_first_chat": float64(time.Date(9999, 12, 31, 23, 59, 59, 999000000, time.UTC).UnixMilli()),
-		}
-		seen := map[string]bool{}
-		chatDir := filepath.Join(chatsPath, strings.TrimSuffix(e.Name(), ".png"))
-		chatEntries, err := os.ReadDir(chatDir)
-		if err != nil {
-			final[e.Name()] = stats
-			continue
-		}
-		for _, ce := range chatEntries {
-			if ce.IsDir() {
-				continue
-			}
-			res := accumulateChatFile(filepath.Join(chatDir, ce.Name()), seen)
-			for k, v := range res.nums {
-				stats[k] = stats[k].(float64) + v
-			}
-			if st, err := os.Stat(filepath.Join(chatDir, ce.Name())); err == nil {
-				stats["chat_size"] = stats["chat_size"].(float64) + float64(st.Size())
-				if mtime := float64(st.ModTime().UnixMilli()); mtime > stats["date_last_chat"].(float64) {
-					stats["date_last_chat"] = mtime
-				}
-			}
-			if res.firstChat < stats["date_first_chat"].(float64) {
-				stats["date_first_chat"] = res.firstChat
-			}
-		}
-		final[e.Name()] = stats
+	}
+	// One character's chats are independent of the next, so they fan out;
+	// the merge below keeps directory order for a deterministic object.
+	type charStatsOut struct {
+		name  string
+		stats map[string]any
+	}
+	outs := make([]charStatsOut, len(pngs))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	for i, name := range pngs {
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			outs[i] = charStatsOut{name: name, stats: statsForCharacter(chatsPath, name)}
+		}(i, name)
+	}
+	wg.Wait()
+	for _, o := range outs {
+		final[o.name] = o.stats
 	}
 	final["timestamp"] = float64(time.Now().UnixMilli())
 	return final
+}
+
+func statsForCharacter(chatsPath, pngName string) map[string]any {
+	stats := map[string]any{
+		"total_gen_time": 0.0, "user_word_count": 0.0, "non_user_word_count": 0.0,
+		"user_msg_count": 0.0, "non_user_msg_count": 0.0, "total_swipe_count": 0.0,
+		"chat_size": 0.0, "date_last_chat": 0.0, "date_first_chat": float64(time.Date(9999, 12, 31, 23, 59, 59, 999000000, time.UTC).UnixMilli()),
+	}
+	seen := map[uint64]bool{}
+	chatDir := filepath.Join(chatsPath, strings.TrimSuffix(pngName, ".png"))
+	chatEntries, err := os.ReadDir(chatDir)
+	if err != nil {
+		return stats
+	}
+	for _, ce := range chatEntries {
+		if ce.IsDir() {
+			continue
+		}
+		res := accumulateChatFile(filepath.Join(chatDir, ce.Name()), seen)
+		for k, v := range res.nums {
+			stats[k] = stats[k].(float64) + v
+		}
+		if info, err := ce.Info(); err == nil {
+			stats["chat_size"] = stats["chat_size"].(float64) + float64(info.Size())
+			if mtime := float64(info.ModTime().UnixMilli()); mtime > stats["date_last_chat"].(float64) {
+				stats["date_last_chat"] = mtime
+			}
+		}
+		if res.firstChat < stats["date_first_chat"].(float64) {
+			stats["date_first_chat"] = res.firstChat
+		}
+	}
+	return stats
+}
+
+// fnv1a64 is a non-crypto hash for the per-run message dedup set. SHA-256
+// here bought nothing (collisions only matter within one recreate), while
+// hex-encoding its digest per message dominated the runtime.
+func fnv1a64(s string) uint64 {
+	const (
+		offset = 14695981039346656037
+		prime  = 1099511628211
+	)
+	h := uint64(offset)
+	for i := 0; i < len(s); i++ {
+		h ^= uint64(s[i])
+		h *= prime
+	}
+	return h
+}
+
+// statsMsg is one chat line decoded as far as stats need: keys stay present
+// for presence checks, values decode lazily per field, and the other ~20
+// fields per message are skipped, never allocated.
+type statsMsg map[string]json.RawMessage
+
+func rawString(raw json.RawMessage) (string, bool) {
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return "", false
+	}
+	return s, true
+}
+
+func rawBool(raw json.RawMessage) bool {
+	var b bool
+	if err := json.Unmarshal(raw, &b); err != nil {
+		return false
+	}
+	return b
+}
+
+func rawAny(raw json.RawMessage) any {
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil
+	}
+	return v
+}
+
+// rawIsNull mirrors the old `msg[key] == nil` test: true when the key is
+// absent (nil RawMessage) or explicitly null.
+func rawIsNull(raw json.RawMessage) bool {
+	t := bytes.TrimSpace(raw)
+	return len(t) == 0 || string(t) == "null"
 }
 
 type chatAccum struct {
@@ -1029,42 +1108,59 @@ type chatAccum struct {
 	firstChat float64
 }
 
-func accumulateChatFile(path string, seen map[string]bool) chatAccum {
-	acc := chatAccum{
+func accumulateChatFile(path string, seen map[uint64]bool) chatAccum {	acc := chatAccum{
 		nums:      map[string]float64{},
 		firstChat: float64(time.Date(9999, 12, 31, 23, 59, 59, 999000000, time.UTC).UnixMilli()),
 	}
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return acc
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
+	defer f.Close()
+	br := bufio.NewReaderSize(f, 64*1024)
+	for {
+		raw, rerr := br.ReadBytes('\n')
+		line := bytes.TrimSpace(raw)
+		if len(line) > 0 {
+			var msg statsMsg
+			if err := json.Unmarshal(line, &msg); err == nil {
+				accumulateStatsLine(&acc, msg, seen)
+			}
 		}
-		var msg map[string]any
-		if err := json.Unmarshal([]byte(line), &msg); err != nil {
-			continue
+		if rerr != nil {
+			break
 		}
-		if mes, ok := msg["mes"].(string); ok && mes != "" {
-			sum := sha256.Sum256([]byte(mes))
-			key := fmt.Sprintf("%x", sum)
+	}
+	return acc
+}
+
+func accumulateStatsLine(acc *chatAccum, msg statsMsg, seen map[uint64]bool) {
+	if raw, ok := msg["mes"]; ok {
+		if mes, ok := rawString(raw); ok && mes != "" {
+			key := fnv1a64(mes)
 			if seen[key] {
-				continue
+				return
 			}
 			seen[key] = true
 		}
-		if gs, ok := msg["gen_started"]; ok && msg["gen_finished"] != nil {
-			if gf, ok := msg["gen_finished"]; ok && gf != nil {
-				acc.nums["total_gen_time"] += float64(parseStatsTimestamp(gf) - parseStatsTimestamp(gs))
-			}
-			if swipes, ok := msg["swipes"].([]any); ok && msg["swipe_info"] == nil {
-				acc.nums["total_gen_time"] += float64(parseStatsTimestamp(msg["gen_finished"])-parseStatsTimestamp(msg["gen_started"])) * float64(len(swipes))
+	}
+	if gs, ok := msg["gen_started"]; ok {
+		if gf, present := msg["gen_finished"]; present && !rawIsNull(gf) {
+			acc.nums["total_gen_time"] += float64(parseStatsTimestamp(rawAny(gf)) - parseStatsTimestamp(rawAny(gs)))
+			if swipes, ok := msg["swipes"]; ok {
+				var arr []json.RawMessage
+				if err := json.Unmarshal(swipes, &arr); err == nil {
+					if _, present := msg["swipe_info"]; !present || rawIsNull(msg["swipe_info"]) {
+						acc.nums["total_gen_time"] += float64(parseStatsTimestamp(rawAny(gf))-parseStatsTimestamp(rawAny(gs))) * float64(len(arr))
+					}
+				}
 			}
 		}
-		if mes, ok := msg["mes"].(string); ok && mes != "" {
+	}
+	if raw, ok := msg["mes"]; ok {
+		if mes, ok := rawString(raw); ok && mes != "" {
 			wc := float64(countStatsWords(mes))
-			if isUser, _ := msg["is_user"].(bool); isUser {
+			if rawBool(msg["is_user"]) {
 				acc.nums["user_word_count"] += wc
 				acc.nums["user_msg_count"]++
 			} else {
@@ -1072,12 +1168,15 @@ func accumulateChatFile(path string, seen map[string]bool) chatAccum {
 				acc.nums["non_user_msg_count"]++
 			}
 		}
-		if swipes, ok := msg["swipes"].([]any); ok && len(swipes) > 1 {
+	}
+	if raw, ok := msg["swipes"]; ok {
+		var swipes []json.RawMessage
+		if err := json.Unmarshal(raw, &swipes); err == nil && len(swipes) > 1 {
 			acc.nums["total_swipe_count"] += float64(len(swipes) - 1)
 			for i := 1; i < len(swipes); i++ {
-				if text, ok := swipes[i].(string); ok {
+				if text, ok := rawString(swipes[i]); ok {
 					wc := float64(countStatsWords(text))
-					if isUser, _ := msg["is_user"].(bool); isUser {
+					if rawBool(msg["is_user"]) {
 						acc.nums["user_word_count"] += wc
 						acc.nums["user_msg_count"]++
 					} else {
@@ -1087,24 +1186,28 @@ func accumulateChatFile(path string, seen map[string]bool) chatAccum {
 				}
 			}
 		}
-		if infos, ok := msg["swipe_info"].([]any); ok && len(infos) > 1 {
+	}
+	if raw, ok := msg["swipe_info"]; ok {
+		var infos []json.RawMessage
+		if err := json.Unmarshal(raw, &infos); err == nil && len(infos) > 1 {
 			for i := 1; i < len(infos); i++ {
-				if info, ok := infos[i].(map[string]any); ok {
-					if gs, ok := info["gen_started"]; ok && info["gen_finished"] != nil {
-						if gf, ok := info["gen_finished"]; ok && gf != nil {
-							acc.nums["total_gen_time"] += float64(parseStatsTimestamp(gf) - parseStatsTimestamp(gs))
-						}
+				var info map[string]json.RawMessage
+				if err := json.Unmarshal(infos[i], &info); err != nil {
+					continue
+				}
+				if gs, ok := info["gen_started"]; ok && !rawIsNull(info["gen_finished"]) {
+					if gf, present := info["gen_finished"]; present && !rawIsNull(gf) {
+						acc.nums["total_gen_time"] += float64(parseStatsTimestamp(rawAny(gf)) - parseStatsTimestamp(rawAny(gs)))
 					}
 				}
 			}
 		}
-		if isUser, _ := msg["is_user"].(bool); isUser {
-			if ts := float64(parseStatsTimestamp(msg["send_date"])); ts < acc.firstChat {
-				acc.firstChat = ts
-			}
+	}
+	if rawBool(msg["is_user"]) {
+		if ts := float64(parseStatsTimestamp(rawAny(msg["send_date"]))); ts < acc.firstChat {
+			acc.firstChat = ts
 		}
 	}
-	return acc
 }
 
 func (h *ContentHandler) BackupChatGet(w http.ResponseWriter, r *http.Request) {

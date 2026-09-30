@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/TurtleTavern/turtletavern/internal/auth"
 	"github.com/TurtleTavern/turtletavern/internal/config"
@@ -86,18 +87,51 @@ func tiktokenModelFor(queryModel string) (string, bool) {
 	return "gpt-3.5-turbo", true
 }
 
-func openaiCodec(queryModel string) (tiktoken.Codec, bool) {
+func openaiCodec(queryModel string) (*cachedCodec, bool) {
 	name, ok := tiktokenModelFor(queryModel)
 	if !ok {
 		return nil, false
 	}
-	if c, err := tiktoken.ForModel(tiktoken.Model(name)); err == nil {
-		return c, true
+	if v, ok := codecCache.Load(name); ok {
+		return v.(*cachedCodec), true
 	}
-	if c, err := tiktoken.ForModel(tiktoken.Model("gpt-3.5-turbo")); err == nil {
-		return c, true
+	c, err := tiktoken.ForModel(tiktoken.Model(name))
+	if err != nil {
+		name = "gpt-3.5-turbo"
+		if v, ok := codecCache.Load(name); ok {
+			return v.(*cachedCodec), true
+		}
+		c, err = tiktoken.ForModel(tiktoken.Model(name))
+		if err != nil {
+			return nil, false
+		}
 	}
-	return nil, false
+	cc := &cachedCodec{c: c}
+	actual, _ := codecCache.LoadOrStore(name, cc)
+	return actual.(*cachedCodec), true
+}
+
+// cachedCodec wraps a tiktoken codec built once and reused. Constructing one
+// parses the whole BPE rank table, which used to happen on every keystroke's
+// token-count request; the mutex guards Encode/Decode in case the codec
+// keeps mutable state.
+type cachedCodec struct {
+	mu sync.Mutex
+	c  tiktoken.Codec
+}
+
+var codecCache sync.Map // model name -> *cachedCodec
+
+func (cc *cachedCodec) encode(text string) ([]uint, []string, error) {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	return cc.c.Encode(text)
+}
+
+func (cc *cachedCodec) decode(ids []uint) (string, error) {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	return cc.c.Decode(ids)
 }
 
 func (h *TokenizersHandler) OpenAIEncode(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +144,7 @@ func (h *TokenizersHandler) OpenAIEncode(w http.ResponseWriter, r *http.Request)
 	text, _ := body["text"].(string)
 	queryModel := r.URL.Query().Get("model")
 	if codec, ok := openaiCodec(queryModel); ok {
-		if ids, chunks, err := codec.Encode(text); err == nil {
+		if ids, chunks, err := codec.encode(text); err == nil {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"ids": ids, "count": len(ids), "chunks": chunks,
 			})
@@ -139,7 +173,7 @@ func (h *TokenizersHandler) OpenAIDecode(w http.ResponseWriter, r *http.Request)
 				}
 			}
 		}
-		if text, err := codec.Decode(ids); err == nil {
+		if text, err := codec.decode(ids); err == nil {
 			_ = json.NewEncoder(w).Encode(map[string]any{"text": text})
 			return
 		}
@@ -164,7 +198,7 @@ func (h *TokenizersHandler) OpenAICount(w http.ResponseWriter, r *http.Request) 
 	codec, exact := openaiCodec(queryModel)
 	encodeLen := func(s string) int {
 		if exact {
-			if ids, _, err := codec.Encode(s); err == nil {
+			if ids, _, err := codec.encode(s); err == nil {
 				return len(ids)
 			}
 		}
