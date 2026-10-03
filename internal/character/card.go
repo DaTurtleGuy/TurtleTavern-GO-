@@ -366,8 +366,12 @@ func GetCharaCardV2(jsonObject map[string]any, dirs models.UserDirectories) (map
 
 func getAlternateGreetings(raw any) []string {
 	switch v := raw.(type) {
+	case []string:
+		result := make([]string, 0, len(v))
+		result = append(result, v...)
+		return result
 	case []any:
-		var result []string
+		result := make([]string, 0, len(v))
 		for _, item := range v {
 			if s, ok := item.(string); ok {
 				result = append(result, s)
@@ -388,7 +392,7 @@ func parseTags(raw any) []string {
 			return []string{}
 		}
 		parts := strings.Split(v, ",")
-		var result []string
+		result := make([]string, 0, len(parts))
 		for _, p := range parts {
 			p = strings.TrimSpace(p)
 			if p != "" {
@@ -396,8 +400,17 @@ func parseTags(raw any) []string {
 			}
 		}
 		return result
+	case []string:
+		result := make([]string, 0, len(v))
+		for _, s := range v {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				result = append(result, s)
+			}
+		}
+		return result
 	case []any:
-		var result []string
+		result := make([]string, 0, len(v))
 		for _, item := range v {
 			if s, ok := item.(string); ok {
 				result = append(result, s)

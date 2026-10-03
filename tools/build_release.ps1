@@ -8,7 +8,7 @@ $stageRoot = Join-Path $env:TEMP "opencode\tt-release"
 $ndk = "C:\Users\Julian\AppData\Local\Android\Sdk\ndk\30.0.15729638\toolchains\llvm\prebuilt\windows-x86_64\bin"
 
 $readme = @"
-TurtleTavern (Go) 0.1.8A
+TurtleTavern (Go) 0.1.8B
 ============================
 
 Run the server binary and open http://127.0.0.1:8000/ in your browser.

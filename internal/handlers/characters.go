@@ -59,6 +59,26 @@ func extractFormData(r *http.Request) map[string]any {
 	return formData
 }
 
+// formStringSlice returns every value submitted for a repeated form field
+// (e.g. alternate_greetings is appended once per greeting by the frontend).
+// extractFormData keeps only v[0], so multi-value fields must be restored
+// via this helper before calling CharaFormatData.
+func formStringSlice(r *http.Request, key string) ([]string, bool) {
+	if vals, ok := r.Form[key]; ok {
+		out := make([]string, len(vals))
+		copy(out, vals)
+		return out, true
+	}
+	if r.MultipartForm != nil {
+		if vals, ok := r.MultipartForm.Value[key]; ok {
+			out := make([]string, len(vals))
+			copy(out, vals)
+			return out, true
+		}
+	}
+	return nil, false
+}
+
 func (h *CharacterHandler) Create(w http.ResponseWriter, r *http.Request) {
 	uc := getUserCtx(r)
 	if uc == nil {
@@ -84,6 +104,9 @@ func (h *CharacterHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	formData := extractFormData(r)
 	formData["ch_name"] = chName
+	if vals, ok := formStringSlice(r, "alternate_greetings"); ok {
+		formData["alternate_greetings"] = vals
+	}
 
 	char := character.CharaFormatData(formData, uc.Directories)
 	charJSON, _ := json.Marshal(char)
@@ -135,6 +158,9 @@ func (h *CharacterHandler) Edit(w http.ResponseWriter, r *http.Request) {
 	targetFile := strings.TrimSuffix(avatarURL, ".png")
 	formData := extractFormData(r)
 	formData["ch_name"] = chName
+	if vals, ok := formStringSlice(r, "alternate_greetings"); ok {
+		formData["alternate_greetings"] = vals
+	}
 
 	char := character.CharaFormatData(formData, uc.Directories)
 	if chat := r.FormValue("chat"); chat != "" {
