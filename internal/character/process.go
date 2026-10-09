@@ -13,9 +13,9 @@ import (
 )
 
 var (
-	charCache   = sync.Map{}
-	cacheStats  = sync.Map{}
-	dateCaches  = sync.Map{}
+	charCache  = sync.Map{}
+	cacheStats = sync.Map{}
+	dateCaches = sync.Map{}
 )
 
 // DateAddedCache holds one characters dir's date_added.json in memory so a
@@ -137,7 +137,7 @@ func ProcessCharacter(item string, dirs models.UserDirectories, shallow bool) (*
 
 	result["chat_size"] = chatSize
 	result["date_last_chat"] = dateLastChat
-	result["data_size"] = util.CalculateDataSize(result["data"])
+	result["data_size"] = EstimateCharacterTokens(result["data"])
 	result["json_data"] = imgData
 
 	if needSave {
@@ -193,7 +193,7 @@ func ProcessCharacterFull(item string, dirs models.UserDirectories) (map[string]
 	chatSize, dateLastChat := ChatStats(chatsDir)
 	result["chat_size"] = chatSize
 	result["date_last_chat"] = dateLastChat
-	result["data_size"] = util.CalculateDataSize(result["data"])
+	result["data_size"] = EstimateCharacterTokens(result["data"])
 	result["json_data"] = imgData
 
 	return result, nil
@@ -266,11 +266,51 @@ func getBool(m map[string]any, key string) bool {
 
 func getFloat64(m map[string]any, key string) float64 {
 	if v, ok := m[key]; ok {
-		if f, ok := v.(float64); ok {
+		if f, ok := toFloat64(v); ok {
 			return f
 		}
 	}
 	return 0
+}
+
+// toFloat64 accepts every numeric kind a map value can hold. Values inserted by
+// this package are concrete Go ints (ChatStats returns int64, CalculateDataSize
+// returns int), while values decoded from JSON are float64. Asserting only
+// float64 silently collapsed chat_size and data_size to 0 for every character,
+// which made the frontend's "Most/Least chats" and "Most/Least tokens" sorts
+// compare 0 - 0 for every card and fall back to the server's directory order.
+func toFloat64(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int8:
+		return float64(n), true
+	case int16:
+		return float64(n), true
+	case int32:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case uint:
+		return float64(n), true
+	case uint8:
+		return float64(n), true
+	case uint16:
+		return float64(n), true
+	case uint32:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	case json.Number:
+		if f, err := n.Float64(); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
 }
 
 func getInt64(m map[string]any, key string) int64 {

@@ -1,3 +1,4 @@
+import { loader } from './action-loader.js';
 import { t } from './i18n.js';
 import { callGenericPopup, Popup, POPUP_TYPE } from './popup.js';
 import { getFileExtension, sortMoments, timestampToMoment } from './utils.js';
@@ -153,68 +154,79 @@ class BackupsBrowser {
 
         this.#backupsListElement.innerHTML = '';
 
-        const response = await fetch('/api/backups/chat/get', {
-            method: 'POST',
-            headers: getRequestHeaders(),
-            signal,
+        const loaderHandle = loader.show({
+            title: t`Backups`,
+            message: t`Loading backups…`,
+            blocking: true,
+            toastMode: loader.ToastMode.NONE,
         });
 
-        if (!response.ok) {
-            console.error('Failed to load chat backups list:', response.statusText);
-            return;
-        }
-
-        /** @type {import('../../src/endpoints/chats.js').ChatInfo[]} */
-        const backupsList = await response.json();
-
-        for (const backup of backupsList.sort((a, b) => sortMoments(timestampToMoment(a.last_mes), timestampToMoment(b.last_mes)))) {
-            const listItem = document.createElement('div');
-            listItem.classList.add('chatBackupsListItem');
-
-            const backupName = document.createElement('div');
-            backupName.textContent = backup.file_name;
-            backupName.classList.add('chatBackupsListItemName');
-
-            const backupInfo = document.createElement('div');
-            backupInfo.classList.add('chatBackupsListItemInfo');
-            backupInfo.textContent = `${timestampToMoment(backup.last_mes).format('lll')} (${backup.file_size}, ${backup.chat_items} 💬)`;
-
-            const actionsList = document.createElement('div');
-            actionsList.classList.add('chatBackupsListItemActions');
-
-            const viewButton = document.createElement('div');
-            viewButton.classList.add('right_menu_button', 'fa-solid', 'fa-eye');
-            viewButton.title = t`View backup`;
-            viewButton.addEventListener('click', async () => {
-                await this.viewBackup(backup.file_name);
+        try {
+            const response = await fetch('/api/backups/chat/get', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                signal,
             });
 
-            const restoreButton = document.createElement('div');
-            restoreButton.classList.add('right_menu_button', 'fa-solid', 'fa-rotate-left');
-            restoreButton.title = t`Restore backup`;
-            restoreButton.addEventListener('click', async () => {
-                await this.restoreBackup(backup.file_name);
-            });
+            if (!response.ok) {
+                console.error('Failed to load chat backups list:', response.statusText);
+                return;
+            }
 
-            const deleteButton = document.createElement('div');
-            deleteButton.classList.add('right_menu_button', 'fa-solid', 'fa-trash');
-            deleteButton.title = t`Delete backup`;
-            deleteButton.addEventListener('click', async () => {
-                const isDeleted = await this.deleteBackup(backup.file_name);
-                if (isDeleted) {
-                    listItem.remove();
-                }
-            });
+            /** @type {import('../../src/endpoints/chats.js').ChatInfo[]} */
+            const backupsList = await response.json();
 
-            actionsList.appendChild(viewButton);
-            actionsList.appendChild(restoreButton);
-            actionsList.appendChild(deleteButton);
+            for (const backup of backupsList.sort((a, b) => sortMoments(timestampToMoment(a.last_mes), timestampToMoment(b.last_mes)))) {
+                const listItem = document.createElement('div');
+                listItem.classList.add('chatBackupsListItem');
 
-            listItem.appendChild(backupName);
-            listItem.appendChild(backupInfo);
-            listItem.appendChild(actionsList);
+                const backupName = document.createElement('div');
+                backupName.textContent = backup.file_name;
+                backupName.classList.add('chatBackupsListItemName');
 
-            this.#backupsListElement.appendChild(listItem);
+                const backupInfo = document.createElement('div');
+                backupInfo.classList.add('chatBackupsListItemInfo');
+                backupInfo.textContent = `${timestampToMoment(backup.last_mes).format('lll')} (${backup.file_size}, ${backup.chat_items} 💬)`;
+
+                const actionsList = document.createElement('div');
+                actionsList.classList.add('chatBackupsListItemActions');
+
+                const viewButton = document.createElement('div');
+                viewButton.classList.add('right_menu_button', 'fa-solid', 'fa-eye');
+                viewButton.title = t`View backup`;
+                viewButton.addEventListener('click', async () => {
+                    await this.viewBackup(backup.file_name);
+                });
+
+                const restoreButton = document.createElement('div');
+                restoreButton.classList.add('right_menu_button', 'fa-solid', 'fa-rotate-left');
+                restoreButton.title = t`Restore backup`;
+                restoreButton.addEventListener('click', async () => {
+                    await this.restoreBackup(backup.file_name);
+                });
+
+                const deleteButton = document.createElement('div');
+                deleteButton.classList.add('right_menu_button', 'fa-solid', 'fa-trash');
+                deleteButton.title = t`Delete backup`;
+                deleteButton.addEventListener('click', async () => {
+                    const isDeleted = await this.deleteBackup(backup.file_name);
+                    if (isDeleted) {
+                        listItem.remove();
+                    }
+                });
+
+                actionsList.appendChild(viewButton);
+                actionsList.appendChild(restoreButton);
+                actionsList.appendChild(deleteButton);
+
+                listItem.appendChild(backupName);
+                listItem.appendChild(backupInfo);
+                listItem.appendChild(actionsList);
+
+                this.#backupsListElement.appendChild(listItem);
+            }
+        } finally {
+            await loaderHandle.hide();
         }
     }
 

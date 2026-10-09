@@ -14,7 +14,13 @@ import (
 	"github.com/TurtleTavern/turtletavern/internal/util"
 )
 
-const indexVersion = 1
+// Bump this whenever the values persisted per character change, so an existing
+// index is rebuilt once instead of serving stale rows forever. 1 stored
+// chat_size and data_size as 0 for every character (the JSON accessors dropped
+// non-float64 numbers), which silently broke the "Most/Least chats" and
+// "Most/Least tokens" sorts. 2 held a raw JSON byte size; 3 holds the
+// character-editor token estimate the frontend's "Most tokens" label implies.
+const indexVersion = 3
 
 type Index struct {
 	db *sql.DB
@@ -91,6 +97,10 @@ func (idx *Index) NeedsRebuild(userFolder string) bool {
 }
 
 func (idx *Index) needsRebuild(userFolder string) bool {
+	var version int
+	if err := idx.db.QueryRow("SELECT value FROM meta WHERE key='version'").Scan(&version); err != nil || version != indexVersion {
+		return true
+	}
 	var maxMtime sql.NullFloat64
 	idx.db.QueryRow("SELECT MAX(mtime) FROM characters WHERE user_folder=?", userFolder).Scan(&maxMtime)
 	indexedMtime := 0.0
@@ -364,6 +374,7 @@ func (idx *Index) RebuildIndexWithProgress(userFolder string, processFn func(str
 	if tx != nil {
 		_ = tx.Commit()
 	}
+	idx.db.Exec("INSERT OR REPLACE INTO meta (key, value) VALUES ('version', ?)", indexVersion)
 	FlushDateAddedCache(userFolder)
 	return results
 }

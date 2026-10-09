@@ -2349,10 +2349,14 @@ const compareFunc = (first, second) => {
             if (!a && b) return 1;         // Move falsy values to the beginning
             if (a === b) return 0;         // Sort equal values normally
             return a < b ? -1 : 1;         // Sort non-boolean values normally
-        default:
-            return typeof a == 'string'
-                ? a.localeCompare(b)
-                : a - b;
+        default: {
+            const cmp = typeof a == 'string' ? a.localeCompare(b) : a - b;
+            if (cmp !== 0) return cmp;
+            // Equal keys (e.g. two cards sharing a display name): fall back to the
+            // card's .png filename so numbered variants stay stable and natural
+            // (Char1 < Char2 < Char10). Direction is handled by sortFunc.
+            return (first.avatar || '').localeCompare(second.avatar || '', undefined, { numeric: true });
+        }
     }
 };
 
