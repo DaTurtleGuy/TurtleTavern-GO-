@@ -79,6 +79,36 @@ func formStringSlice(r *http.Request, key string) ([]string, bool) {
 	return nil, false
 }
 
+// readUploadedAvatar returns the 'avatar' part of a character form as PNG bytes.
+//
+// Character cards must be PNG — that is the format the card writer patches — but
+// browsers upload whatever the user picked: ST's ensureImageFormatSupported
+// passes JPEG (and every other "supported" type) through untouched, so a JPEG
+// reaches the server as often as a PNG does. Anything decodable is therefore
+// re-encoded here, which is what the Node backend gets for free from Jimp.
+//
+// A missing or zero-length part means "no new image": nil, no error. Errors mean
+// the bytes were there but could not be decoded.
+//
+// Regression this guards against: a JPEG upload made WriteCharacterDataToPNG
+// fail ("unexpected EOF"), Edit/EditAvatar threw the error away, and the request
+// answered 200 with the picture unchanged — an edit that silently did nothing.
+func readUploadedAvatar(r *http.Request) ([]byte, error) {
+	file, _, err := r.FormFile("avatar")
+	if err != nil {
+		return nil, nil // no file part at all
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(file)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) == 0 {
+		return nil, nil // empty part: nothing to write
+	}
+	return cropAvatarImage(raw, r.URL.Query().Get("crop"))
+}
+
 func (h *CharacterHandler) Create(w http.ResponseWriter, r *http.Request) {
 	uc := getUserCtx(r)
 	if uc == nil {
@@ -112,15 +142,11 @@ func (h *CharacterHandler) Create(w http.ResponseWriter, r *http.Request) {
 	charJSON, _ := json.Marshal(char)
 	os.MkdirAll(filepath.Join(uc.Directories.Chats, fileName), 0o755)
 
-	var inputImage []byte
-	if file, _, err := r.FormFile("avatar"); err == nil {
-		defer file.Close()
-		inputImage, _ = io.ReadAll(file)
-		if rawCrop := r.URL.Query().Get("crop"); rawCrop != "" && inputImage != nil {
-			if cropped, err := cropAvatarImage(inputImage, rawCrop); err == nil {
-				inputImage = cropped
-			}
-		}
+	inputImage, err := readUploadedAvatar(r)
+	if err != nil {
+		log.Printf("create character: avatar: %v", err)
+		http.Error(w, "Is not a valid image", http.StatusBadRequest)
+		return
 	}
 
 	if err := character.WriteCharacterDataToFile(inputImage, string(charJSON), fileName, uc.Directories); err != nil {
@@ -171,15 +197,31 @@ func (h *CharacterHandler) Edit(w http.ResponseWriter, r *http.Request) {
 	}
 	charJSON, _ := json.Marshal(char)
 
-	if file, _, err := r.FormFile("avatar"); err == nil {
-		defer file.Close()
-		inputImage, _ := io.ReadAll(file)
+	inputImage, err := readUploadedAvatar(r)
+	if err != nil {
+		log.Printf("edit character: avatar: %v", err)
+		http.Error(w, "Is not a valid image", http.StatusBadRequest)
+		return
+	}
+	if inputImage != nil {
 		media.InvalidateThumbnail(uc.Directories.Root, media.ThumbAvatar, avatarURL)
-		character.WriteCharacterDataToFile(inputImage, string(charJSON), targetFile, uc.Directories)
 	} else {
+		// No new picture in this request: rewrite the card with the image that
+		// is already on disk. Passing nil to the writer would replace the
+		// character's picture with the default avatar.
 		avatarPath := filepath.Join(uc.Directories.Characters, avatarURL)
-		inputImage, _ := os.ReadFile(avatarPath)
-		character.WriteCharacterDataToFile(inputImage, string(charJSON), targetFile, uc.Directories)
+		existing, readErr := os.ReadFile(avatarPath)
+		if readErr != nil {
+			log.Printf("edit character: read %s: %v", avatarURL, readErr)
+			http.Error(w, "character not found", http.StatusBadRequest)
+			return
+		}
+		inputImage = existing
+	}
+	if err := character.WriteCharacterDataToFile(inputImage, string(charJSON), targetFile, uc.Directories); err != nil {
+		log.Printf("edit character: write %s: %v", avatarURL, err)
+		http.Error(w, "write failed", http.StatusInternalServerError)
+		return
 	}
 	h.upsertFull(uc, avatarURL)
 	w.WriteHeader(http.StatusOK)
@@ -204,13 +246,6 @@ func (h *CharacterHandler) EditAvatar(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	file, _, err := r.FormFile("avatar")
-	if err != nil {
-		http.Error(w, "no file uploaded", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-	inputImage, _ := io.ReadAll(file)
 	charPath := filepath.Join(uc.Directories.Characters, avatarURL)
 	if !util.FileExists(charPath) {
 		http.Error(w, "character not found", http.StatusBadRequest)
@@ -221,8 +256,22 @@ func (h *CharacterHandler) EditAvatar(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot read character", http.StatusBadRequest)
 		return
 	}
+	inputImage, err := readUploadedAvatar(r)
+	if err != nil {
+		log.Printf("edit-avatar: %v", err)
+		http.Error(w, "Is not a valid image", http.StatusBadRequest)
+		return
+	}
+	if inputImage == nil {
+		http.Error(w, "no file uploaded", http.StatusBadRequest)
+		return
+	}
 	targetFile := strings.TrimSuffix(avatarURL, ".png")
-	character.WriteCharacterDataToFile(inputImage, data, targetFile, uc.Directories)
+	if err := character.WriteCharacterDataToFile(inputImage, data, targetFile, uc.Directories); err != nil {
+		log.Printf("edit-avatar: write %s: %v", avatarURL, err)
+		http.Error(w, "write failed", http.StatusInternalServerError)
+		return
+	}
 	media.InvalidateThumbnail(uc.Directories.Root, media.ThumbAvatar, avatarURL)
 	w.WriteHeader(http.StatusOK)
 }

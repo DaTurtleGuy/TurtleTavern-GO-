@@ -91,6 +91,20 @@ class Client:
         except Exception:
             return -1, b""
 
+    def req_headers(self, method, path):
+        headers = {}
+        if self.token:
+            headers["X-CSRF-Token"] = self.token
+        r = urllib.request.Request(self.base + path, headers=headers,
+                                   method=method)
+        try:
+            with self.opener.open(r, timeout=20) as resp:
+                return resp.status, dict(resp.headers)
+        except urllib.error.HTTPError as e:
+            return e.code, dict(e.headers)
+        except Exception:
+            return -1, {}
+
     def req_multipart(self, method, path, fields):
         boundary = "----verifyboundary1234"
         parts = []
@@ -454,6 +468,25 @@ def main():
         return len(data) > 2000
     check("GET /thumbnail scales real image (not blank)",
           thumbnail_has_image_content)
+
+    def images_may_not_be_cached_heuristically():
+        # Avatar/character files are overwritten in place, so browsers must be
+        # told to revalidate; with no Cache-Control at all Chrome/WebView kept
+        # serving the previous picture from its heuristic cache.
+        paths = ("/User%20Avatars/user-default.png",
+                 "/thumbnail?type=persona&file=user-default.png",
+                 "/thumbnail?type=avatar&file=default_Seraphina.png")
+        for path in paths:
+            code, headers = c.req_headers("GET", path)
+            cache_control = headers.get("Cache-Control", "")
+            if code != 200 or ("max-age=0" not in cache_control
+                               and "no-cache" not in cache_control):
+                print(f"    {path} -> {code} "
+                      f"Cache-Control: {cache_control or '(missing)'}")
+                return False
+        return True
+    check("GET user images/thumbnails revalidate (Cache-Control)",
+          images_may_not_be_cached_heuristically)
 
     def meta_cycle():
         a = c.req("POST", "/api/image-metadata/all", {})[0]

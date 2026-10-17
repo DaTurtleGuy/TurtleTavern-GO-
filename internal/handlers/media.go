@@ -1389,6 +1389,7 @@ func (h *MediaHandler) Thumbnail(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
+		media.SetRevalidateHeader(w)
 		h.maybeFirefoxCache(w, r, p)
 		http.ServeFile(w, r, p)
 	}
@@ -1425,6 +1426,7 @@ func (h *MediaHandler) Thumbnail(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	media.SetRevalidateHeader(w)
 	h.maybeFirefoxCache(w, r, cached)
 	http.ServeFile(w, r, cached)
 }

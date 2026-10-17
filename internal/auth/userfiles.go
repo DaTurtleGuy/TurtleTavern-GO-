@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/TurtleTavern/turtletavern/internal/media"
 	"github.com/TurtleTavern/turtletavern/internal/models"
 	"github.com/go-chi/chi/v5"
 )
@@ -39,6 +40,9 @@ func (s *Session) serveUserFile(dirFn func(dirs models.UserDirectories) string) 
 			http.Error(w, "Not Found", http.StatusNotFound)
 			return
 		}
+		// Avatars, character cards and backgrounds are overwritten in place,
+		// so the browser must revalidate instead of reusing its cached copy.
+		media.SetRevalidateHeader(w)
 		http.ServeFile(w, r, absFull)
 	}
 }

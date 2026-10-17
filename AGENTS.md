@@ -231,6 +231,88 @@ character.WriteCharacterDataToFile(imgBytes, string(charJSON), targetFile, uc.Di
 
 **User impact:** First load after update requires a hard refresh (Ctrl+Shift+R). After that, changes propagate automatically.
 
+## Profile Pictures "Don't Update" — image Cache-Control (Fixed 2026-10-17)
+
+**Symptom:** changing a persona or character picture appeared to do nothing — the
+old image kept showing, on the phone and in desktop Chrome. The server was fine:
+the new file was on disk, `/api/avatars/upload` answered 200, and the regenerated
+thumbnail had the new bytes. A page reload did not help either.
+
+**Root cause:** the Go port served user data files with plain `http.ServeFile`,
+which sets `Last-Modified` but **no `Cache-Control` and no `ETag`**. Node serves
+the same files through Express's `res.sendFile`, which sends
+`Cache-Control: public, max-age=0` (+ weak ETag) — i.e. "cache it, but revalidate
+every time". Without an explicit freshness directive browsers fall back to
+*heuristic* caching (a fraction of the file's age): Chrome — and therefore the
+Android WebView — answered `<img>` requests from its HTTP cache **without ever
+asking the server**. Every avatar/character picture is overwritten IN PLACE
+(same URL, same file name, new bytes), so the overwrite stayed invisible for days.
+Firefox looked fine only because of the `must-understand, no-store` hack, and
+that hack was applied to `/thumbnail` only, never to `/User Avatars/*`.
+
+**Fix:** `media.SetRevalidateHeader` (`internal/media/cache.go`) sends
+`Cache-Control: public, max-age=0`, called from `serveUserFile`
+(`internal/auth/userfiles.go`, covers `/User Avatars/*`, `/characters/*`,
+`/backgrounds/*`, `/assets/*`, `/user/images/*`, `/user/files/*`) and from the
+`/thumbnail` handler for both the cached and the original file paths. The Firefox
+override stays (it is applied after, so Firefox still gets `no-store` on
+thumbnails).
+
+**Lesson:** any response serving a file that is *rewritten in place* needs an
+explicit revalidation directive, matching what Express's `sendFile` does. This is
+the image equivalent of the JS/CSS/HTML `no-cache` policy above — the
+server-side half (`InvalidateThumbnail` on image change, commit 28ab3ce) was
+already in place and is NOT enough on its own. `/thumbnail`'s `generateThumbnail`
+mtime check is dead code: the handler only calls it when the cached file is
+missing, same as Node.
+
+**Pinned by:** `verify/endpoints.py` → "GET user images/thumbnails revalidate
+(Cache-Control)" (fails with `Cache-Control: (missing)` if the header is dropped).
+
+**User impact:** WebView HTTP cache entries created *before* the fix carry no
+freshness info and keep their heuristic lifetime, so a one-time clear of the
+app's cache (Android Settings → Apps → TurtleTavern → Storage → Clear cache) may
+be needed after installing the fixed build; entries created afterwards revalidate
+automatically.
+
+## Character pictures: non-PNG uploads silently ignored (Fixed 2026-10-17)
+
+**Symptom:** changing a character's picture did nothing at all. `/characters/<name>.png`
+kept its previous bytes (same size, same `Last-Modified`) while the UI behaved as if the
+edit succeeded — reproduced from a *different machine with an empty browser cache*, so it
+was never a caching problem.
+
+**Root cause:** ST's `ensureImageFormatSupported` only converts WEBP/AVIF, so a JPEG picked
+from disk arrives untouched as `part 'avatar'; filename="images.jpg"; Content-Type: image/jpeg`.
+Character cards must be PNG (the card writer patches PNG chunks), so
+`WriteCharacterDataToPNG` failed on those bytes with `unexpected EOF` — and `Edit` /
+`EditAvatar` **threw the error away** and answered `200` with an empty body. The frontend
+saw success, so nothing looked broken. `Create` did at least surface a 500; the flow users
+actually use to change a picture was the silent one. The Node backend never had this
+because Jimp decodes any format and re-encodes PNG.
+
+Evidence that nails it (reusable method): the browser HAR shows `POST /api/characters/edit`
+→ `200`, `content.size: 0`, with the JPEG part, while the target file's `Last-Modified` is
+from an earlier day; and `bodySize` minus the sum of the text params leaves only the image's
+own bytes. A local repro (JSON-less: build the multipart by hand) gives
+`edit JPEG -> 200 body: b''` with the file byte-identical, `create JPEG -> 500 write failed`,
+and `edit PNG -> 200` changing the file.
+
+**Fix:** `readUploadedAvatar` (`internal/handlers/characters.go`) reads the `avatar` part and
+passes it through `cropAvatarImage`, which decodes any registered format (PNG/JPEG/GIF) and
+re-encodes PNG — the normalization Jimp gives Node for free. Used by `Create`, `Edit` and
+`EditAvatar`; all three now check the write error (500 + a log line) instead of dropping it,
+and a missing or zero-length part means "no new picture" instead of "write an empty image"
+(a nil image makes the writer substitute the default avatar — the 2026-09-14 bug in a new
+coat).
+
+**Lesson:** never discard the error from `WriteCharacterDataToFile`, never assume an uploaded
+image is a PNG, and remember that `200` with an empty body means "the handler finished", not
+"your change was written".
+
+**Pinned by:** `internal/handlers/characters_avatar_test.go` (JPEG→PNG, PNG passthrough,
+empty part, absent part, garbage).
+
 ## Backup/Restore Feature
 
 ### Export (GET /api/users/backup)
@@ -279,7 +361,8 @@ CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
 # Verify (always run after changes)
 go build ./...
 go vet ./...
-python verify/endpoints.py        # 46/46
+go test ./...                     # includes character avatar upload tests
+python verify/endpoints.py        # 47/47
 python verify/backup_restore.py   # 21/21
 ```
 
