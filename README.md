@@ -29,8 +29,8 @@ knowledge base — when something breaks, check there first.
 ## Building
 
 ```bash
-# Windows x64 (pure Go, CGO off — the local gcc emits a binary Windows
-# refuses to run)
+# Windows x64 (CGO off by choice — desktop builds need no C toolchain;
+# CGO itself works fine on Windows when something requires it)
 CGO_ENABLED=0 go build -ldflags "-s -w" -o gotavern.exe ./cmd/server
 
 # Termux / Android arm64 — CGO is REQUIRED (DNS + TLS resolution on Android)
@@ -59,6 +59,15 @@ independently: the backend number only bumps on Go changes.
   frontend aborted the request, not a server failure.
 - Static frontend assets serve `Cache-Control: no-cache`; server read/write
   timeouts are `0` so multi-GB restores aren't cut mid-stream.
+- Find in chat / find in card (frontend): instant centered jumps,
+  wrap-around navigation, whole-card coverage including the Advanced
+  Definitions popup (auto-revealed), and a load-full-history action for
+  truncated long chats.
+- Character picture uploads accept any image format and are re-encoded to
+  PNG (cards must be PNG); write failures return 500 instead of a silent 200.
+- User-data images serve `Cache-Control: public, max-age=0` (revalidate every
+  time, like Express `sendFile`), so in-place picture overwrites show up
+  without cache clears.
 - SQLite driver splits by build tag: `mattn/go-sqlite3` on android (CGO),
   `modernc.org/sqlite` on desktop (pure Go).
 
