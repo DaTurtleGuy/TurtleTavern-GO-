@@ -136,6 +136,8 @@ func readDateAdded(path string) dateAddedMap {
 // was imported or restored, and it is what makes "Newest/Oldest" useless
 // afterwards. The oldest message is the earliest evidence the character existed,
 // so it becomes the creation date, in the card and in date_added.json alike.
+// Poisoned 0 entries are raised to the oldest message too: a 0 can never be
+// ordered by the frontend's "Newest" sort.
 func (h *CharacterHandler) clampCreationDates(dirs models.UserDirectories) {
 	entries, err := os.ReadDir(dirs.Characters)
 	if err != nil {
@@ -156,12 +158,12 @@ func (h *CharacterHandler) clampCreationDates(dirs models.UserDirectories) {
 	for i, avatar := range avatars {
 		name := strings.TrimSuffix(avatar, ".png")
 		oldest, ok := character.ChatOldestSendDate(filepath.Join(dirs.Chats, name))
-		if ok {
+		if ok && oldest > 0 {
 			if cardDate, err := cardCreateDate(filepath.Join(dirs.Characters, avatar)); err == nil &&
 				cardDate > 0 && cardDate > oldest {
 				setCardCreateDate(filepath.Join(dirs.Characters, avatar), oldest)
 			}
-			if added, ok := dateAdded[name]; !ok || added > oldest {
+			if added, ok := dateAdded[name]; !ok || added == 0 || added > oldest {
 				if !ok || added != oldest {
 					dateAdded[name] = oldest
 					dirty = true

@@ -198,27 +198,47 @@ func (idx *Index) upsertCharacterDB(db dbExecer, userFolder string, char models.
 	creatorNotes := char.Data.CreatorNotes
 	creator := char.Data.Creator
 	charVer := char.Data.CharacterVersion
-	createDate := char.CreateDate
-	if createDate == nil || createDate == "" || createDate == 0.0 {
+	// Normalize the schemaless CreateDate (scanned from SQLite it can be an
+	// int64, float64 or nil) to a float; 0/empty/nil all mean "missing".
+	// The old chain of `any == ""` / `any == 0.0` comparisons was type-fragile:
+	// an int64(0) never equals float64(0.0) across an interface, so a zero
+	// create_date slipped through and was stored as 0, which the frontend's
+	// "Newest" sort (by create_date) reads as 1970 and buries at the bottom.
+	createDate := 0.0
+	if f, ok := toFloat64(char.CreateDate); ok {
+		createDate = f
+	}
+	if createDate == 0 {
 		createDate = char.DateAdded
 	}
 	dateAdded := char.DateAdded
-	if dateAdded == 0 || createDate == nil || createDate == "" || createDate == 0.0 {
+	if dateAdded == 0 || createDate == 0 {
 		var exAdded, exCreated float64
 		_ = db.QueryRow("SELECT date_added, create_date FROM characters WHERE user_folder=? AND avatar=?",
 			userFolder, char.Avatar).Scan(&exAdded, &exCreated)
 		if dateAdded == 0 {
 			dateAdded = exAdded
 		}
-		if createDate == nil || createDate == "" || createDate == 0.0 {
+		if createDate == 0 {
 			createDate = exCreated
-			if createDate == nil || createDate == 0.0 {
+			if createDate == 0 {
 				createDate = dateAdded
 			}
 		}
 	}
-	if createDate == nil || createDate == 0.0 {
-		createDate = 0.0
+	if createDate == 0 {
+		createDate = dateAdded
+	}
+	// Last resort: the file exists (mtime was statted above), so never store
+	// a 0 that "Newest" cannot order. For a fresh import mtime is now, which
+	// is the correct creation evidence; legacy 0 rows get a real date here
+	// and the recompute clamp then pulls them back to their oldest message
+	// when chats exist.
+	if dateAdded == 0 {
+		dateAdded = mtime
+	}
+	if createDate == 0 {
+		createDate = dateAdded
 	}
 
 	// Import/edit/rename callers only know avatar+name, so an upsert must not
@@ -275,6 +295,14 @@ func (idx *Index) RebuildIndex(userFolder string, processFn func(string, models.
 }
 
 func pruneDateAddedFile(userFolder string, valid map[string]struct{}) {
+	// Drop deleted entries from the shared cache first so the file write and
+	// the in-memory view stay consistent (the cache is the source of truth
+	// for ProcessCharacter during the rebuild below).
+	if c, ok := dateCaches.Load(userFolder); ok {
+		c.(*DateAddedCache).Prune(valid)
+		c.(*DateAddedCache).Flush()
+		return
+	}
 	path := filepath.Join(userFolder, "date_added.json")
 	data, err := os.ReadFile(path)
 	if err != nil {

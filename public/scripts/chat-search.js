@@ -152,8 +152,10 @@ function setCurrent(index, scroll) {
 }
 
 function scrollToMatch(mark) {
+    // Instant jump like Chrome find: smooth animations race with typing and
+    // rapid next/prev, and never settle reliably on mobile WebViews.
     try {
-        mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        mark.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' });
     } catch (_) {
         // scrollIntoView options unsupported: fall back to instant jump.
         try {
@@ -252,7 +254,7 @@ export async function loadAllMessagesForSearch() {
         loadAllInProgress = false;
         setLoadAllSpinner(false);
     }
-    runChatSearch(false);
+    runChatSearch(true);
     updateLoadAllVisibility();
 }
 

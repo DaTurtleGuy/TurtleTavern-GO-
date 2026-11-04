@@ -4015,8 +4015,6 @@
                             <h4>
                                 <span>TurtleTavern Additions</span>
                             </h4>
-                            <h5 class="m-t-1"><span>Chat History Processor (Pre-Tokenization)</span></h5>
-                            <small class="displayBlock m-b-1">Runs before token counting. Modifications affect token budget.</small>
                             <div class="range-block">
                                 <label for="replace_vowels"
                                     class="checkbox_label widthFreeExpand">
@@ -4036,27 +4034,38 @@
                                     <span>Run custom JavaScript on chat messages before token counting</span>
                                 </div>
                             </div>
-                            <div class="m-t-1">
-                                <small class="displayBlock m-b-1">
-                                    Function receives <code>messages</code> array of <code>{role, content}</code> objects. Return modified array.<br>
-                                    <strong>Note:</strong> Messages are in reverse order — <code>messages[0]</code> is the newest, <code>messages[length-1]</code> is the oldest.
-                                </small>
-                                <textarea id="pre_processor_code"
-                                    class="text_pole textarea_compact monospace autoSetHeight"
-                                    rows="6" spellcheck="false" placeholder="// Remove details blocks from old messages&#10;// messages = messages.filter(m => !m.content.includes('<details'));&#10;// return messages;"></textarea>
-                            </div>
-                            <div class="range-block">
-                                <label for="pre_processor_fallback"
-                                    class="checkbox_label widthFreeExpand">
-                                    <input id="pre_processor_fallback" type="checkbox" checked>
-                                    <span>Fallback to Unmodified on Error</span>
-                                </label>
-                                <div class="toggle-description justifyLeft">
-                                    <span>If checked, errors will log and continue with unmodified messages. If unchecked, errors abort generation.</span>
+                            <div class="inline-drawer m-t-1 wide100p">
+                                <div class="inline-drawer-toggle inline-drawer-header">
+                                    <div class="title_restorable flexGap5 wide100p">
+                                        <span class="flex1">Chat History Processor (Pre-Tokenization)</span>
+                                    </div>
+                                    <div class="flex-container widthFitContent">
+                                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down interactable"></div>
+                                    </div>
+                                </div>
+                                <div class="inline-drawer-content">
+                                    <small class="displayBlock m-b-1">Runs before token counting. Modifications affect token budget.</small>
+                                    <div class="m-t-1">
+                                        <small class="displayBlock m-b-1">
+                                            Function receives <code>messages</code> array of <code>{role, content}</code> objects. Return modified array.<br>
+                                            <strong>Note:</strong> Messages are in reverse order — <code>messages[0]</code> is the newest, <code>messages[length-1]</code> is the oldest.
+                                        </small>
+                                        <textarea id="pre_processor_code"
+                                            class="text_pole textarea_compact monospace autoSetHeight"
+                                            rows="6" spellcheck="false" placeholder="// Remove details blocks from old messages&#10;// messages = messages.filter(m => !m.content.includes('<details'));&#10;// return messages;"></textarea>
+                                    </div>
+                                    <div class="range-block">
+                                        <label for="pre_processor_fallback"
+                                            class="checkbox_label widthFreeExpand">
+                                            <input id="pre_processor_fallback" type="checkbox" checked>
+                                            <span>Fallback to Unmodified on Error</span>
+                                        </label>
+                                        <div class="toggle-description justifyLeft">
+                                            <span>If checked, errors will log and continue with unmodified messages. If unchecked, errors abort generation.</span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                            <h5 class="m-t-1"><span>Prompt Post-Processor (Post-Tokenization)</span></h5>
-                            <small class="displayBlock m-b-1">Runs after token counting. Has final say before API call.</small>
                             <div class="range-block">
                                 <label for="post_processor_enabled"
                                     class="checkbox_label widthFreeExpand">
@@ -4067,23 +4076,36 @@
                                     <span>Run custom JavaScript on final prompt after tokenization</span>
                                 </div>
                             </div>
-                            <div class="m-t-1">
-                                <small class="displayBlock m-b-1">
-                                    Function receives <code>messages</code> array of <code>{role, content}</code> objects. Return modified array.<br>
-                                    <strong>Note:</strong> Messages are in reverse order — <code>messages[0]</code> is the newest, <code>messages[length-1]</code> is the oldest.
-                                </small>
-                                <textarea id="post_processor_code"
-                                    class="text_pole textarea_compact monospace autoSetHeight"
-                                    rows="6" spellcheck="false" placeholder="// Last-chance modifications before API call"></textarea>
-                            </div>
-                            <div class="range-block">
-                                <label for="post_processor_fallback"
-                                    class="checkbox_label widthFreeExpand">
-                                    <input id="post_processor_fallback" type="checkbox" checked>
-                                    <span>Fallback to Unmodified on Error</span>
-                                </label>
-                                <div class="toggle-description justifyLeft">
-                                    <span>If checked, errors will log and continue with unmodified prompt. If unchecked, errors abort generation.</span>
+                            <div class="inline-drawer m-t-1 wide100p">
+                                <div class="inline-drawer-toggle inline-drawer-header">
+                                    <div class="title_restorable flexGap5 wide100p">
+                                        <span class="flex1">Prompt Post-Processor (Post-Tokenization)</span>
+                                    </div>
+                                    <div class="flex-container widthFitContent">
+                                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down interactable"></div>
+                                    </div>
+                                </div>
+                                <div class="inline-drawer-content">
+                                    <small class="displayBlock m-b-1">Runs after token counting. Has final say before API call.</small>
+                                    <div class="m-t-1">
+                                        <small class="displayBlock m-b-1">
+                                            Function receives <code>messages</code> array of <code>{role, content}</code> objects. Return modified array.<br>
+                                            <strong>Note:</strong> Messages are in reverse order — <code>messages[0]</code> is the newest, <code>messages[length-1]</code> is the oldest.
+                                        </small>
+                                        <textarea id="post_processor_code"
+                                            class="text_pole textarea_compact monospace autoSetHeight"
+                                            rows="6" spellcheck="false" placeholder="// Last-chance modifications before API call"></textarea>
+                                    </div>
+                                    <div class="range-block">
+                                        <label for="post_processor_fallback"
+                                            class="checkbox_label widthFreeExpand">
+                                            <input id="post_processor_fallback" type="checkbox" checked>
+                                            <span>Fallback to Unmodified on Error</span>
+                                        </label>
+                                        <div class="toggle-description justifyLeft">
+                                            <span>If checked, errors will log and continue with unmodified prompt. If unchecked, errors abort generation.</span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

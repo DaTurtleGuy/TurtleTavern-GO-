@@ -12339,6 +12339,10 @@ jQuery(async function () {
             '.text_pole',
             '#toast-container',
             '.select2-results',
+            // In-chat and in-card find bars: tapping them must never collapse
+            // open drawers (the bars live outside the drawers by design).
+            '#chat_search_bar',
+            '#field_search_bar',
         ];
 
         for (const id of forbiddenTargets) {
@@ -12794,6 +12798,8 @@ async function replaceQuotes() {
     editedCharacter.data.personality = sanitizeFuckingText(editedCharacter.data.personality);
     editedCharacter.description = sanitizeFuckingText(editedCharacter.description);
     editedCharacter.data.description = sanitizeFuckingText(editedCharacter.data.description);
+    editedCharacter.mes_example = sanitizeFuckingText(editedCharacter.mes_example || '');
+    editedCharacter.data.mes_example = sanitizeFuckingText(editedCharacter.data.mes_example || '');
 
     characters[this_chid] = editedCharacter;
     await saveCurrentCharacterDataProgrammatically();
@@ -12816,6 +12822,9 @@ async function deleteAsterisks() {
 
     editedCharacter.description = editedCharacter.description.replace(/\*/g, '');
     editedCharacter.data.description = editedCharacter.data.description.replace(/\*/g, '');
+
+    editedCharacter.mes_example = (editedCharacter.mes_example || '').replace(/\*/g, '');
+    editedCharacter.data.mes_example = (editedCharacter.data.mes_example || '').replace(/\*/g, '');
 
     characters[this_chid] = editedCharacter;
     await saveCurrentCharacterDataProgrammatically();

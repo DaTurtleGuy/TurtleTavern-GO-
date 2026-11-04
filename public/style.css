@@ -962,6 +962,19 @@ mark.chat-search-current {
     max-width: 92%;
 }
 
+/* Advanced Definitions search: bar lives inside the scrollable
+   #character_popup, so it sticks to the top while scrolling the card. */
+#field_search_bar.fs-sticky {
+    position: sticky;
+    top: 6px;
+    left: auto;
+    transform: none;
+    z-index: 5;
+    margin: 0 auto 6px auto;
+    max-width: 100%;
+    border-radius: 8px;
+}
+
 #fieldSearch {
     flex: 1 1 60px;
     min-width: 60px;

@@ -5,6 +5,8 @@
  * textarea (mirrored text + scroll position), cleared on edit or close.
  */
 
+import { toggleDrawer } from './utils.js';
+
 const BAR_ID = 'field_search_bar';
 const INPUT_ID = 'fieldSearch';
 const COUNT_ID = 'fieldSearchCount';
@@ -14,6 +16,8 @@ const NEXT_ID = 'fieldSearchNext';
 const CLOSE_ID = 'fieldSearchClose';
 const CARD_BUTTON_ID = 'cardSearch';
 const GREET_BUTTON_CLASS = 'field_search_greetings_btn';
+const ADVANCED_BUTTON_CLASS = 'field_search_advanced_btn';
+const ADVANCED_SCOPE_LABEL = 'Advanced Definitions';
 const BACKDROP_CLASS = 'fs-backdrop';
 const CONTENT_CLASS = 'fs-content';
 const MATCH_CLASS = 'fs-match';
@@ -87,10 +91,48 @@ function resolveScope() {
         return [];
     }
     try {
+        // NOTE: hidden textareas are deliberately included (Chrome find also
+        // matches collapsed sections). setCurrent() reveals the match's
+        // container before painting, so navigation lands on every field.
         return scopeResolver().filter(el =>
-            el instanceof HTMLTextAreaElement && el.isConnected && el.offsetParent !== null);
+            el instanceof HTMLTextAreaElement && el.isConnected);
     } catch (_) {
         return [];
+    }
+}
+
+/**
+ * Reveal a textarea hidden inside collapsed UI so the match can be painted
+ * and scrolled to: opens the Advanced Definitions popup and expands any
+ * collapsed inline-drawers above it. Synchronous (instant expand, no slide
+ * animation) so geometry is valid on the next frame.
+ * @param {HTMLTextAreaElement} ta
+ */
+function revealTextarea(ta) {
+    try {
+        const popup = ta.closest('#character_popup');
+        if (popup && popup instanceof HTMLElement) {
+            const visible = popup.style.display !== 'none' && ta.offsetParent !== null;
+            if (!visible) {
+                const adv = document.getElementById('advanced_div');
+                const popupVisible = window.getComputedStyle(popup).display !== 'none';
+                if (adv && !popupVisible) {
+                    adv.click();
+                }
+            }
+        }
+        let node = ta.parentElement;
+        while (node && node !== document.body) {
+            if (node.classList && node.classList.contains('inline-drawer-content')) {
+                const drawer = node.closest('.inline-drawer');
+                if (drawer && window.getComputedStyle(node).display === 'none') {
+                    toggleDrawer(/** @type {HTMLElement} */ (drawer), true);
+                }
+            }
+            node = node.parentElement;
+        }
+    } catch (_) {
+        // reveal is best-effort; paint still runs
     }
 }
 
@@ -259,7 +301,7 @@ function paintField(ta, fieldMatches, currentGlobal) {
 }
 
 function setCurrent(index, scroll) {
-    const live = matches.filter(m => m.ta.isConnected && m.ta.offsetParent !== null);
+    const live = matches.filter(m => m.ta.isConnected);
     if (live.length !== matches.length) {
         matches = live;
     }
@@ -275,20 +317,26 @@ function setCurrent(index, scroll) {
         return;
     }
     const match = matches[currentIndex];
+    // Reveal collapsed containers first so the textarea has real geometry.
+    revealTextarea(match.ta);
+    // Instant jump like Chrome find (smooth animations race with typing and
+    // rapid next/prev, and never settle reliably on mobile WebViews).
     try {
-        match.ta.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        match.ta.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' });
     } catch (_) {
         // ignore
     }
     window.requestAnimationFrame(() => {
-        const fieldMatches = matches.filter(m => m.ta === match.ta);
-        const mark = paintField(match.ta, fieldMatches, match);
-        if (mark) {
-            const ta = match.ta;
-            const top = mark.offsetTop - ta.clientHeight / 2;
-            ta.scrollTop = Math.max(0, top);
-            syncScroll();
-        }
+        window.requestAnimationFrame(() => {
+            const fieldMatches = matches.filter(m => m.ta === match.ta);
+            const mark = paintField(match.ta, fieldMatches, match);
+            if (mark) {
+                const ta = match.ta;
+                const top = mark.offsetTop - ta.clientHeight / 2;
+                ta.scrollTop = Math.max(0, top);
+                syncScroll();
+            }
+        });
     });
 }
 
@@ -331,7 +379,7 @@ export function prevFieldMatch() {
     setCurrent(currentIndex - 1, true);
 }
 
-export function openFieldSearch(resolver, label, mountEl) {
+export function openFieldSearch(resolver, label, mountEl, sticky = false) {
     scopeResolver = resolver;
     scopeLabel = label;
     const bar = ensureBar();
@@ -341,9 +389,14 @@ export function openFieldSearch(resolver, label, mountEl) {
     }
     const target = mountEl instanceof HTMLElement ? mountEl : document.body;
     if (bar.parentElement !== target) {
-        target.appendChild(bar);
+        if (sticky && target.firstChild) {
+            target.prepend(bar);
+        } else {
+            target.appendChild(bar);
+        }
     }
-    bar.classList.toggle('fs-in-popup', target !== document.body);
+    bar.classList.toggle('fs-in-popup', target !== document.body && !sticky);
+    bar.classList.toggle('fs-sticky', sticky);
     const scopeEl = document.getElementById(SCOPE_ID);
     if (scopeEl) {
         scopeEl.textContent = label;
@@ -364,6 +417,23 @@ export function openDefinitionSearch() {
     openFieldSearch(() => DEFINITION_SELECTORS
         .flatMap(sel => Array.from(document.querySelectorAll(sel)))
         .filter(el => el instanceof HTMLTextAreaElement), 'Definitions');
+}
+
+const ADVANCED_SELECTORS = [
+    '#system_prompt_textarea',
+    '#post_history_instructions_textarea',
+    '#creator_notes_textarea',
+    '#personality_textarea',
+    '#scenario_pole',
+    '#mes_example_textarea',
+];
+
+export function openAdvancedSearch() {
+    const popup = document.getElementById('character_popup');
+    openFieldSearch(() => ADVANCED_SELECTORS
+        .flatMap(sel => Array.from(document.querySelectorAll(sel)))
+        .filter(el => el instanceof HTMLTextAreaElement),
+    ADVANCED_SCOPE_LABEL, popup instanceof HTMLElement ? popup : document.body, true);
 }
 
 export function openGreetingsSearch(root) {
@@ -494,6 +564,38 @@ function injectGreetingsButton(popupRoot) {
     anchor.after(btn);
 }
 
+function injectAdvancedButton() {
+    const popup = document.getElementById('character_popup');
+    if (!(popup instanceof HTMLElement)) {
+        return;
+    }
+    if (popup.querySelector(`.${ADVANCED_BUTTON_CLASS}`)) {
+        return;
+    }
+    const anchor = popup.querySelector('#character_popup_text');
+    if (!anchor) {
+        return;
+    }
+    const btn = document.createElement('div');
+    btn.className = `menu_button menu_button_icon ${ADVANCED_BUTTON_CLASS}`;
+    btn.setAttribute('role', 'button');
+    btn.setAttribute('tabindex', '0');
+    btn.title = 'Search Advanced Definitions fields';
+    btn.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i><span>Search</span>';
+    const fire = event => {
+        event.preventDefault();
+        event.stopPropagation();
+        openAdvancedSearch();
+    };
+    btn.addEventListener('click', fire);
+    btn.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            fire(event);
+        }
+    });
+    anchor.after(btn);
+}
+
 function watchGreetingsPopups() {
     const observer = new MutationObserver(mutations => {
         let greetingsOpen = false;
@@ -530,6 +632,22 @@ export function initFieldSearch() {
 
     $(`#${CARD_BUTTON_ID}`).on('click', openDefinitionSearch);
 
+    injectAdvancedButton();
+
+    // Closing the Advanced Definitions popup ends an Advanced-scoped search
+    // (mirrors the greetings-popup watcher below).
+    ['character_cross', 'character_popup_ok'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) {
+            return;
+        }
+        el.addEventListener('click', () => {
+            if (scopeLabel === ADVANCED_SCOPE_LABEL) {
+                closeFieldSearch();
+            }
+        });
+    });
+
     document.addEventListener('keydown', event => {
         if (event.key !== 'Escape') {
             return;
@@ -555,10 +673,17 @@ export function initFieldSearch() {
 
     globalThis.__ttFieldSearch = {
         openDefinitions: openDefinitionSearch,
+        openAdvanced: openAdvancedSearch,
         openGreetings: openGreetingsSearch,
         close: closeFieldSearch,
         next: nextFieldMatch,
         prev: prevFieldMatch,
-        state: () => ({ count: matches.length, index: currentIndex, query: getQuery(), scope: scopeLabel }),
+        state: () => ({
+            count: matches.length,
+            index: currentIndex,
+            query: getQuery(),
+            scope: scopeLabel,
+            fields: new Set(matches.map(m => m.ta.id || m.ta.name || '?')).size,
+        }),
     };
 }

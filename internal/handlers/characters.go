@@ -372,66 +372,15 @@ func (h *CharacterHandler) MergeAttributes(w http.ResponseWriter, r *http.Reques
 }
 
 func removeDateAddedEntry(charactersDir, dirName string) {
-	if dirName == "" {
-		return
-	}
-	dictPath := filepath.Join(charactersDir, "date_added.json")
-	data, err := os.ReadFile(dictPath)
-	if err != nil {
-		return
-	}
-	var dict map[string]any
-	if err := json.Unmarshal(data, &dict); err != nil {
-		return
-	}
-	if _, ok := dict[dirName]; !ok {
-		return
-	}
-	delete(dict, dirName)
-	if out, err := json.Marshal(dict); err == nil {
-		_ = util.AtomicWrite(dictPath, out)
-	}
+	character.RemoveDateAddedEntry(charactersDir, dirName)
 }
 
 func setDateAddedEntry(charactersDir, base string, ms float64) {
-	if base == "" {
-		return
-	}
-	dictPath := filepath.Join(charactersDir, "date_added.json")
-	dict := make(map[string]any)
-	if data, err := os.ReadFile(dictPath); err == nil {
-		_ = json.Unmarshal(data, &dict)
-	}
-	dict[base] = ms
-	if out, err := json.MarshalIndent(dict, "", "    "); err == nil {
-		_ = util.AtomicWrite(dictPath, out)
-	}
+	character.SetDateAddedEntry(charactersDir, base, ms)
 }
 
 func moveDateAddedEntry(charactersDir, oldBase, newBase string) {
-	if oldBase == "" || newBase == "" || oldBase == newBase {
-		return
-	}
-	dictPath := filepath.Join(charactersDir, "date_added.json")
-	data, err := os.ReadFile(dictPath)
-	if err != nil {
-		return
-	}
-	var dict map[string]any
-	if err := json.Unmarshal(data, &dict); err != nil {
-		return
-	}
-	oldVal, ok := dict[oldBase]
-	if !ok {
-		return
-	}
-	if _, exists := dict[newBase]; !exists {
-		dict[newBase] = oldVal
-	}
-	delete(dict, oldBase)
-	if out, err := json.MarshalIndent(dict, "", "    "); err == nil {
-		_ = util.AtomicWrite(dictPath, out)
-	}
+	character.MoveDateAddedEntry(charactersDir, oldBase, newBase)
 }
 
 func (h *CharacterHandler) upsertFull(uc *models.UserContext, avatar string, nameOverride ...string) {
