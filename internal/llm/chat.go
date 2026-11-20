@@ -617,20 +617,28 @@ func (h *ChatHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if re, ok := body["reasoning_effort"]; ok && (source == SrcCustom || source == SrcOpenAI) {
-		for _, m := range openaiReasoningEffortModels {
-			if m == model {
-				if fixed, ok := openaiFixedReasoningEffort[model]; ok {
-					bodyParams["reasoning_effort"] = fixed
-				} else if rs, ok := re.(string); ok {
-					if mapped, ok := openaiReasoningEffortMap[rs]; ok {
-						bodyParams["reasoning_effort"] = mapped
+		if source == SrcCustom {
+			// Custom can front any model (proxy), not just OpenAI ones:
+			// forward the effort unless reasoning was explicitly switched off.
+			if v, exists := body["include_reasoning"]; !exists || v != false {
+				bodyParams["reasoning_effort"] = re
+			}
+		} else {
+			for _, m := range openaiReasoningEffortModels {
+				if m == model {
+					if fixed, ok := openaiFixedReasoningEffort[model]; ok {
+						bodyParams["reasoning_effort"] = fixed
+					} else if rs, ok := re.(string); ok {
+						if mapped, ok := openaiReasoningEffortMap[rs]; ok {
+							bodyParams["reasoning_effort"] = mapped
+						} else {
+							bodyParams["reasoning_effort"] = re
+						}
 					} else {
 						bodyParams["reasoning_effort"] = re
 					}
-				} else {
-					bodyParams["reasoning_effort"] = re
+					break
 				}
-				break
 			}
 		}
 	}
